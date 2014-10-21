@@ -140,7 +140,7 @@ process_exit (void)
 	delete_child_all_or_one(true, NULL);
 
 	//set the exit flag if already killed by the kernel
-	if (thread_alive(cur->parent_tid)) {
+	if (is_thread_alive(cur->parent_tid)) {
 
 		cur->my_position_in_parent_children->has_exited = true;
 	}
