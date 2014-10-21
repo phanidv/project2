@@ -132,6 +132,8 @@ typedef enum { FAILED_LOAD, LOAD_NOT_STARTED, SUCESSFUL_LOAD} load_status;
 struct spawned_child_thread {
 	int process_id;
 	load_status load_status;
+
+	// set to true if the parent thread is waiting on this
 	bool is_waiting;
 	int status_value;
 	bool has_exited;
