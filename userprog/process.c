@@ -250,6 +250,8 @@ static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
+static void push_onto_stack(void **ptr, char *value, int size_of_value);
+static void resize_array_memory(char **arr, int *capacity);
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
@@ -487,6 +489,26 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   return true;
 }
 
+/**
+ * Increases the stack pointer and copies the value
+ */
+static void
+push_onto_stack(void **ptr, char *value, int size_of_value) {
+
+	*ptr -= size_of_value;
+	memcpy(*ptr, value, size_of_value);
+}
+
+/**
+ * Doubles the capacity of the character array
+ */
+static void
+resize_array_memory(char **arr, int *capacity) {
+
+	*capacity = *capacity * 2;
+	arr = realloc(arr, *capacity * sizeof(char *));
+}
+
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
@@ -509,27 +531,25 @@ setup_stack (void **esp, const char* file_name)
 	  }
   }
 
-  int argc = 0, size = 0, argv_capacity = DEF_ARR_CAPACITY;
+  int argc = 0, argv_capacity = DEF_ARR_CAPACITY;
   char *token, *save_ptr;
   char **argv = malloc(DEF_ARR_CAPACITY * sizeof(char *));
 
-  // Push args onto stack
+  // Pushing args onto stack
   for (token = strtok_r (file_name, " ", &save_ptr); token != NULL;
 		  token = strtok_r (NULL, " ", &save_ptr)) {
 
-	  size = strlen(token) + 1;
-	  *esp -= size;
+	  push_onto_stack(esp, token, strlen(token) + 1);
 	  argv[argc] = *esp;
 	  argc++;
 
-	  //Resizing ~ similar to Java's ArrayList
+	  //Resizing the argv array
 	  if (argc >= argv_capacity) {
 
 		  argv_capacity *= 2;
 		  argv = realloc(argv, argv_capacity * sizeof(char *));
+		  //resize_array_memory(argv, &argv_capacity);
 	  }
-
-	  memcpy(*esp, token, size);
   }
 
   //Padding word align, if needed - 4 bytes
@@ -537,38 +557,31 @@ setup_stack (void **esp, const char* file_name)
   int word_align = (size_t) *esp % 4;
   if (word_align != 0) {
 
-	  *esp -= word_align;
-	  memcpy(*esp, &word_align_pad, word_align);
+	  //esp needs to be padded
+	  push_onto_stack(esp, &word_align_pad, word_align);
   }
 
-  //Pushing the null sentinel
-  argv[argc] = 0;
+  //Setting the null sentinel
+  int null_sentinel = 0;
+  push_onto_stack(esp, &null_sentinel, sizeof(int *));
 
   //Pushing the addresses of argv elements
   int i = 0;
-  for (i = argc; i>=0; i--) {
+  for (i = argc - 1; i>=0; i--) {
 
-	  size = sizeof(char *);
-	  *esp -= size;
-	  memcpy(*esp, &argv[i], size);
+	  push_onto_stack(esp, &argv[i], sizeof(char *));
   }
 
   //Pushing argv address onto the stack
-  char *temp_argv = *esp;
-  size = sizeof(char **);
-  *esp -= size;
-  memcpy(*esp, &temp_argv, size);
+  char *argv_addr = *esp;
+  push_onto_stack(esp, &argv_addr, sizeof(char **));
 
   //Pushing argc onto the stack
-  size = sizeof(int);
-  *esp -= size;
-  memcpy(*esp, &argc, size);
+  push_onto_stack(esp, &argc, sizeof(int *));
 
   //Pushing fake "return address"
   int fake_return_addr = 0;
-  size = sizeof(int *);
-  *esp -= size;
-  memcpy(*esp, &fake_return_addr, size);
+  push_onto_stack(esp, &fake_return_addr, sizeof(int *));
 
   //Freeing up argv
   free(argv);
