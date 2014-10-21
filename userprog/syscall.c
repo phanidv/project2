@@ -276,7 +276,7 @@ void close(int fd) {
  * Checks if a given virtual address is valid.
  */
 void is_virtual_addr_valid(const void *virtual_addr) {
-	if (virtual_addr < ((void *) 0x08048000) || !is_user_virtual_addr(virtual_addr)) {
+	if (virtual_addr < ((void *) 0x08048000) || (virtual_addr > PHYS_BASE)) {
 		exit(SYSCALL_ERROR);
 	}
 }
