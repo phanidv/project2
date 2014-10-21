@@ -110,7 +110,7 @@ struct thread {
 	int parent_tid;
 
 	// The descriptor of file
-	int file_descriptor;
+	int current_fd_to_be_assigned;
 
 	// List files used by the thread
 	struct list currently_used_files;
@@ -189,6 +189,6 @@ void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
-bool thread_alive(int pid);
+bool is_thread_alive(int pid);
 
 #endif /* threads/thread.h */

@@ -433,7 +433,7 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	list_push_back(&all_list, &t->allelem);
 
 	list_init(&t->currently_used_files);
-	t->file_descriptor = MIN_FD;
+	t->current_fd_to_be_assigned = MIN_FD;
 
 	list_init(&t->children);
 	t->my_position_in_parent_children = NULL;
@@ -546,7 +546,7 @@ static tid_t allocate_tid(void) {
  Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
-bool thread_alive(int pid) {
+bool is_thread_alive(int pid) {
 	struct list_elem *e;
 
 	for (e = list_begin(&all_list); e != list_end(&all_list);
