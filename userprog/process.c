@@ -122,7 +122,6 @@ process_wait (tid_t child_tid UNUSED)
 		lock_acquire(&child_process->wait_lock);
 		cond_wait(&child_process->wait_cond, &child_process->wait_lock);
 		lock_release(&child_process->wait_lock);
-		//barrier();
 	}
 	child_process->is_waiting = false;
 
@@ -586,12 +585,11 @@ void setup_args_on_stack(const char** file_name, void*** esp) {
 	}
 
 	//Setting the null sentinel on the stack
-	int null_sentinel = 0;
-	push_onto_stack(esp, &null_sentinel, sizeof(int*));
+	argv[argc] = 0;
 
 	// Setting up the addresses of argv items
 	int i = 0;
-	for (i = argc - 1; i >= 0; i--) {
+	for (i = argc; i >= 0; i--) {
 
 		push_onto_stack(esp, &argv[i], sizeof(char*));
 	}

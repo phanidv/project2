@@ -292,6 +292,7 @@ void exit(int status) {
 		struct spawned_child_thread *my_pos = current_thread->my_position_in_parent_children;
 		my_pos->status_value = status;
 		if (my_pos->is_waiting) {
+
 			lock_acquire(&my_pos->wait_lock);
 			cond_signal(&my_pos->wait_cond, &my_pos->wait_lock);
 			lock_release(&my_pos->wait_lock);
