@@ -14,16 +14,12 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 
-// Lock that should be acquired to perform any file operations.
-struct lock file_resource_lock;
-
 int add_file_to_currently_used_files(struct file *file_);
 struct file* get_file_from_currently_used_files(int file_descriptor);
 
 static void syscall_handler(struct intr_frame *);
 int get_physicaladdr(const void *virtual_addr);
-void retrieve_syscall_param(struct intr_frame *f, int *arg,
-		int number_of_parameters);
+int retrieve_syscall_param(struct intr_frame *f, int offset);
 void is_virtual_addr_valid(const void *virtual_addr);
 void is_memory_mapped(void* buffer, unsigned size);
 
@@ -38,124 +34,133 @@ int perform_actions_after_file_open(struct file *file_);
 void close_single_file(struct file_details* file_detials);
 struct file_details* find_file_details(struct thread *t, int file_descriptor);
 
+#define POINTER_SIZE sizeof(char *)
+
+/*
+ * Lock that should be acquired to perform any file operations.
+ */
+struct lock file_resource_lock;
 
 void syscall_init(void) {
 	// Initializing the lock.
 	lock_init(&file_resource_lock);
 	intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
-
+/*
+ *	This is the main handler for syscalls
+ */
 static void syscall_handler(struct intr_frame *f UNUSED) {
+
+	/*
+	 * check if the esp is a valid address
+	 * A valid address is between PHYS_BASE and 0x08048000
+	 *
+	 * 0x08048000 is where the code segment starts
+	 */
 	is_virtual_addr_valid((const void*) f->esp);
 
+	//get the system call number from esp
 	int system_call_number = *(int *) f->esp;
+
 	switch (system_call_number) {
 	case SYS_HALT: {
 		halt();
 		break;
 	}
 	case SYS_EXIT: {
-		int arg[1];
-		retrieve_syscall_param(f, &arg[0], 1);
 		// The status for sys_exit
-		int status = arg[0];
+		int status = retrieve_syscall_param(f, POINTER_SIZE);
 		exit(status);
 		break;
 	}
 	case SYS_EXEC: {
-		int arg[1];
-		retrieve_syscall_param(f, &arg[0], 1);
-		const char *file = get_physcial_file(arg[0]);
+		const char *file = get_physcial_file(retrieve_syscall_param(f, POINTER_SIZE * 1));
 		f->eax = exec(file);
 		break;
 	}
 	case SYS_WAIT: {
-		int arg[1];
-		retrieve_syscall_param(f, &arg[0], 1);
-		int pid = arg[0];
+		int pid = retrieve_syscall_param(f, 4);
 		f->eax = wait(pid);
 		break;
 	}
 	case SYS_CREATE: {
-		int arg[2];
-		retrieve_syscall_param(f, &arg[0], 2);
-		const char *file = get_physcial_file(arg[0]);
-		unsigned initial_size = get_size(arg[1]);
+		const char *file = get_physcial_file(retrieve_syscall_param(f, POINTER_SIZE * 1));
+		unsigned initial_size = get_size(retrieve_syscall_param(f, POINTER_SIZE * 2));
 		f->eax = create(file, initial_size);
 		break;
 	}
 	case SYS_REMOVE: {
-		int arg[1];
-		retrieve_syscall_param(f, &arg[0], 1);
-		const char *file = get_physcial_file(arg[0]);
+		const char *file = get_physcial_file(retrieve_syscall_param(f, POINTER_SIZE * 1));
 		f->eax = remove(file);
 		break;
 	}
 	case SYS_OPEN: {
-		int arg[1];
-		retrieve_syscall_param(f, &arg[0], 1);
-		const char *file = get_physcial_file(arg[0]);
+		const char *file = get_physcial_file(retrieve_syscall_param(f, POINTER_SIZE * 1));
 		f->eax = open(file);
 		break;
 	}
 	case SYS_FILESIZE: {
-		int arg[1];
-		retrieve_syscall_param(f, &arg[0], 1);
-		int file_descriptor = get_file_descriptor(arg[0]);
+		int file_descriptor = get_file_descriptor(retrieve_syscall_param(f, POINTER_SIZE * 1));
+
 		f->eax = filesize(file_descriptor);
 		break;
 	}
 	case SYS_READ: {
-		int arg[3];
-		retrieve_syscall_param(f, &arg[0], 3);
-		void *virtual_buffer = (void *) arg[1];
-		unsigned size = get_size(arg[2]);
+		void *virtual_buffer = (void *) retrieve_syscall_param(f, POINTER_SIZE * 2);
+		unsigned size = get_size(retrieve_syscall_param(f, POINTER_SIZE * 3));
 		is_memory_mapped(virtual_buffer, size);
+
 		void *physical_buffer = get_physicaladdr(virtual_buffer);
-		int file_descriptor = get_file_descriptor(arg[0]);
+		int file_descriptor = get_file_descriptor(retrieve_syscall_param(f, POINTER_SIZE * 1));
+
 		f->eax = read(file_descriptor, physical_buffer, size);
 		break;
 	}
 	case SYS_WRITE: {
-		int arg[3];
-		retrieve_syscall_param(f, &arg[0], 3);
-		void *virtual_buffer = (void *) arg[1];
-		unsigned size = get_size(arg[2]);
+		void *virtual_buffer = (void *) retrieve_syscall_param(f, POINTER_SIZE * 2);
+				unsigned size = get_size(retrieve_syscall_param(f, POINTER_SIZE * 3));
 		is_memory_mapped(virtual_buffer, size);
+
 		void *physical_buffer = get_physicaladdr(virtual_buffer);
-		int file_descriptor = get_file_descriptor(arg[0]);
+		int file_descriptor = get_file_descriptor(retrieve_syscall_param(f, POINTER_SIZE * 1));
+
 		f->eax = write(file_descriptor, physical_buffer, size);
 		break;
 	}
 	case SYS_SEEK: {
-		int arg[2];
-		retrieve_syscall_param(f, &arg[0], 2);
-		int file_descriptor = get_file_descriptor(arg[0]);
-		unsigned position = (unsigned) arg[1];
+		int file_descriptor = get_file_descriptor(retrieve_syscall_param(f, POINTER_SIZE * 1));
+		unsigned position = (unsigned) retrieve_syscall_param(f, POINTER_SIZE * 2);
+
 		seek(file_descriptor, position);
 		break;
 	}
 	case SYS_TELL: {
-		int arg[1];
-		retrieve_syscall_param(f, &arg[0], 1);
-		int file_descriptor = get_file_descriptor(arg[0]);
+		int file_descriptor = get_file_descriptor(retrieve_syscall_param(f, POINTER_SIZE * 1));
+
 		f->eax = tell(file_descriptor);
 		break;
 	}
 	case SYS_CLOSE: {
-		int arg[1];
-		retrieve_syscall_param(f, &arg[0], 1);
-		int file_descriptor = get_file_descriptor(arg[0]);
+		int file_descriptor = get_file_descriptor(retrieve_syscall_param(f, POINTER_SIZE * 1));
+
 		close(file_descriptor);
 		break;
 	}
 	}
 }
 
+/*
+ * This is the OS shutdown
+ */
 void halt(void) {
 	shutdown_power_off();
 }
 
+/*
+ *Terminates the current user program, returning status to the kernel.
+ *If the process's parent waits for it (see below), this is the status that will be returned.
+ *Conventionally, a status of 0 indicates success and nonzero values indicate errors.
+ */
 void exit(int status) {
 	struct thread *current_thread = thread_current();
 	if (is_thread_alive(current_thread->parent_tid)) {
@@ -165,6 +170,16 @@ void exit(int status) {
 	thread_exit();
 }
 
+
+/*
+ *Runs the executable whose name is given in cmd_line, passing any given arguments,
+ *and returns the new process's program id (pid).
+ *
+ *Must return pid -1, which otherwise should not be a valid pid, if the program cannot load or run for any reason.
+ *Thus, the parent process cannot return from the exec until it knows whether the child process successfully loaded its executable.
+ *
+ *TODO: Must use appropriate synchronization to ensure this.
+ */
 pid_t exec(const char *cmd_line) {
 	pid_t pid = process_execute(cmd_line);
 	struct spawned_child_thread* cp = retrieve_child(pid);
@@ -178,10 +193,33 @@ pid_t exec(const char *cmd_line) {
 	return pid;
 }
 
+
+/*
+ *Waits for a child process pid and retrieves the child's exit status.
+ *
+ *If pid is still alive, waits until it terminates.Then, returns the status that pid passed to exit.
+ *If pid did not call exit(), but was terminated by the kernel (e.g. killed due to an exception), wait(pid) must return -1.
+ *
+ *Note: It is perfectly legal for a parent process to wait for child processes that have already terminated by the time
+ *the parent calls wait, but the kernel must still allow the parent to retrieve its child's exit status,
+ *or learn that the child was terminated by the kernel.
+ *
+ *
+ *wait must fail and return -1 immediately if any of the following conditions is true:
+ *1. pid does not refer to a direct child of the calling process.
+ *pid is a direct child of the calling process if and only if the calling process
+ *received pid as a return value from a successful call to exec.
+ *
+ *2.The process that calls wait has already called wait on pid. That is, a process may wait for any given child at most once.
+ */
 int wait(pid_t pid) {
 	return process_wait(pid);
 }
 
+
+/**
+ *Creates a new file called file initially initial_size bytes in size. Returns true if successful, false otherwise.
+ */
 bool create(const char *file, unsigned initial_size) {
 	lock_acquire(&file_resource_lock);
 	bool success = filesys_create(file, initial_size);
@@ -189,6 +227,11 @@ bool create(const char *file, unsigned initial_size) {
 	return success;
 }
 
+
+/**
+ *Deletes the file called file. Returns true if successful, false otherwise.
+ *A file may be removed regardless of whether it is open or closed, and removing an open file does not close it.
+ */
 bool remove(const char *file) {
 	lock_acquire(&file_resource_lock);
 	bool success = filesys_remove(file);
@@ -196,6 +239,11 @@ bool remove(const char *file) {
 	return success;
 }
 
+
+/**
+ *Opens the file called file.
+ *Returns a nonnegative integer handle called a "file descriptor" (fd), or -1 if the file could not be opened.
+ */
 int open(const char *file) {
 	lock_acquire(&file_resource_lock);
 	struct file *f = filesys_open(file);
@@ -204,6 +252,10 @@ int open(const char *file) {
 	return file_descriptor;
 }
 
+
+/**
+ *Returns the size, in bytes, of the file open as fd.
+ */
 int filesize(int file_descriptor) {
 	lock_acquire(&file_resource_lock);
 	struct file *f = get_file_from_currently_used_files(file_descriptor);
@@ -216,6 +268,13 @@ int filesize(int file_descriptor) {
 	return size;
 }
 
+
+/**
+ *Reads size bytes from the file open as fd into buffer.
+ *
+ *Returns the number of bytes actually read (0 at end of file),
+ *or -1 if the file could not be read (due to a condition other than end of file).
+ */
 int read(int file_descriptor, void *buffer, unsigned size) {
 	if (file_descriptor == STDIN_FILENO) {
 		int size_ = read_from_standard_input(buffer, size);
@@ -225,6 +284,12 @@ int read(int file_descriptor, void *buffer, unsigned size) {
 	return bytes;
 }
 
+
+/**
+ *Writes size bytes from buffer to the open file fd.
+ *
+ *Returns the number of bytes actually written, which may be less than size if some bytes could not be written.
+ */
 int write(int file_descriptor, const void *buffer, unsigned size) {
 	if (file_descriptor == STDOUT_FILENO) {
 		int size_ = write_to_standard_output(buffer, size);
@@ -234,6 +299,11 @@ int write(int file_descriptor, const void *buffer, unsigned size) {
 	return bytes;
 }
 
+
+/**
+ * Changes the next byte to be read or written in open file fd to position,
+ * expressed in bytes from the beginning of the file.
+ */
 void seek(int fd, unsigned position) {
 	lock_acquire(&file_resource_lock);
 	struct file *f = get_file_from_currently_used_files(fd);
@@ -245,6 +315,11 @@ void seek(int fd, unsigned position) {
 	lock_release(&file_resource_lock);
 }
 
+
+/**
+ *Returns the position of the next byte to be read or written in open file fd,
+ *expressed in bytes from the beginning of the file.
+ */
 unsigned tell(int fd) {
 	lock_acquire(&file_resource_lock);
 	struct file *f = get_file_from_currently_used_files(fd);
@@ -257,105 +332,132 @@ unsigned tell(int fd) {
 	return offset;
 }
 
+
+/**
+ *Closes file descriptor fd.
+ *
+ *Exiting or terminating a process implicitly closes all its open file descriptors,
+ *as if by calling this function for each one.
+ */
 void close(int fd) {
 	lock_acquire(&file_resource_lock);
 	close_file(fd);
 	lock_release(&file_resource_lock);
 }
 
+
+
 /**
- * Checks if a given virtual address is valid.
+ * Utility functions
  */
-void is_virtual_addr_valid(const void *virtual_addr) {
-	if (virtual_addr < ((void *) 0x08048000) || !is_user_vaddr(virtual_addr)) {
-		exit(SYSCALL_ERROR);
-	}
-}
 
-// Returns the physical address corresponding to the give virtual address. If physical addressed is unmapped, this function will call exit().
-int get_physicaladdr(const void *virtual_addr) {
-	//TODO
-	// TO DO: Need to check if all bytes within range are correct
-	// for strings + buffers
-	//***********
-	is_virtual_addr_valid(virtual_addr);
-	void *physical_addr = pagedir_get_page(thread_current()->pagedir,
-			virtual_addr);
-	if (physical_addr == NULL) {
-		exit(SYSCALL_ERROR);
-	}
-	return (int) physical_addr;
-}
-
+/**
+ * Adds file to the list of files used the thread
+ */
 int add_file_to_currently_used_files(struct file *file_) {
+
 	struct file_details *f_details = malloc(sizeof(struct file_details));
+
 	f_details->file = file_;
 	f_details->file_descriptor = thread_current()->current_fd_to_be_assigned;
+
 	thread_current()->current_fd_to_be_assigned++;
+
 	list_push_back(&thread_current()->currently_used_files, &f_details->elem);
+
 	return f_details->file_descriptor;
 }
 
+
+/**
+ * Retrieves the file from the threads file list based on file descriptor
+ */
 struct file* get_file_from_currently_used_files(int file_descriptor) {
 	struct thread *t = thread_current();
-	struct list_elem *e;
+	struct list_elem *e = list_begin(&t->currently_used_files);
 
-	e = list_begin(&t->currently_used_files);
 	while (e != list_end(&t->currently_used_files)) {
 		struct file_details *file_details_ =
 				list_entry (e, struct file_details, elem);
+
+
 		if (file_descriptor == file_details_->file_descriptor) {
+
+			//found the file. just return
 			return file_details_->file;
 		}
+
 		e = list_next(e);
 	}
 
 	return NULL;
 }
 
-void close_file(int fd) {
-	struct thread *t = thread_current();
+
+/**
+ * Close file.
+ *
+ * If fd = PROCESS_EXIT then closes all files.
+ * otherwise just close the file with given file descriptor.
+ *
+ * frees up memory respectively.
+ */
+void close_file(int file_descriptor) {
+	struct thread *current_thread = thread_current();
 	struct list_elem *next, *e;
 
-	if (fd != PROCESS_EXIT) {
-		struct file_details *pf = find_file_details(t, fd);
-		if (pf != NULL) {
-			close_single_file(pf);
+	if (file_descriptor != PROCESS_EXIT) {
+		struct file_details *file_details_ = find_file_details(current_thread, file_descriptor);
+		if (file_details_ != NULL) {
+
+			//helper to close file with descriptor fd.
+			close_single_file(file_details_);
 		}
 	} else {
-		for (e = list_begin(&t->currently_used_files);
-				e != list_end(&t->currently_used_files); e = next) {
+		for (e = list_begin(&current_thread->currently_used_files);
+				e != list_end(&current_thread->currently_used_files); e = next) {
 			next = list_next(e);
-			struct file_details *pf = list_entry (e, struct file_details, elem);
-			if (pf != NULL) {
-				close_single_file(pf);
+
+			struct file_details *file_details_ = list_entry (e, struct file_details, elem);
+
+			if (file_details_ != NULL) {
+				close_single_file(file_details_);
 			}
 		}
 	}
 }
-
-// Closes single file
+/**
+ * Closes a single file
+ */
 void close_single_file(struct file_details* file_detials) {
+
 	if (file_detials != NULL) {
 		file_close(file_detials->file);
 		list_remove(&file_detials->elem);
+
 		free(file_detials);
 	}
 }
 
-// Finds the file details in the list of currently used files of thread using the file descriptor.
+
+/**
+ * Finds the file details in the list of currently used files of thread using the file descriptor.
+ */
 struct file_details* find_file_details(struct thread *t, int file_descriptor) {
 	struct list_elem *e;
 
 	for (e = list_begin(&t->currently_used_files);
 			e != list_end(&t->currently_used_files); e = list_next(e)) {
-		struct file_details *pf = list_entry (e, struct file_details, elem);
-		if (file_descriptor == pf->file_descriptor) {
-			return pf;
+
+		struct file_details *file_details_ = list_entry (e, struct file_details, elem);
+
+		if (file_descriptor == file_details_->file_descriptor) {
+			return file_details_;
 		}
 	}
 	return NULL;
 }
+
 
 // Returns the file pointer
 char* get_physcial_file(int file_syscall_parameter) {
@@ -363,14 +465,64 @@ char* get_physcial_file(int file_syscall_parameter) {
 			(const void *) file_syscall_parameter);
 }
 
+
 // returns the size as unsidned value.
 unsigned int get_size(int size_syscall_parameter) {
 	return (unsigned) size_syscall_parameter;
 }
 
+
 // Returns the file descriptor.
 int get_file_descriptor(int file_descriptor_syscall_parameter) {
 	return file_descriptor_syscall_parameter;
+}
+
+// Retrieves the system call parameters
+int retrieve_syscall_param(struct intr_frame *f, int offset) {
+	int *ptr;
+	ptr = f->esp + offset;
+	is_virtual_addr_valid((const void *) ptr);
+	return *ptr;
+}
+
+// Checks if the buffer is valid.
+void is_memory_mapped(void* buffer, unsigned size) {
+	unsigned i;
+	char* buffer_ = (char *) buffer;
+	for (i = 0; i < size; i++, buffer_++) {
+		is_virtual_addr_valid((const void*) buffer_);
+	}
+
+// Write to standard output
+int write_to_standard_output(void *buffer, unsigned size_to_be_read) {
+	putbuf(buffer, size_to_be_read);
+	return size_to_be_read;
+}
+
+// Writes to file
+int write_to_file(int file_descriptor, void *buffer, unsigned size_to_be_read) {
+	lock_acquire(&file_resource_lock);
+
+	struct file *f = get_file_from_currently_used_files(file_descriptor);
+	if (f == NULL) {
+		lock_release(&file_resource_lock);
+		return SYSCALL_ERROR;
+	}
+
+	int bytes = file_write(f, buffer, size_to_be_read);
+
+	lock_release(&file_resource_lock);
+	return bytes;
+}
+
+// Performs actions after file is opened
+int perform_actions_after_file_open(struct file *file_) {
+	if (file_ == NULL) {
+		return SYSCALL_ERROR;
+	}
+
+	int file_descriptor = add_file_to_currently_used_files(file_);
+	return file_descriptor;
 }
 
 // Reads for standard input.
@@ -386,61 +538,40 @@ int read_from_standard_input(void *buffer, unsigned size_to_be_read) {
 // Reads from file
 int read_from_file(int file_descriptor, void *buffer, unsigned size_to_be_read) {
 	lock_acquire(&file_resource_lock);
+
 	struct file *f = get_file_from_currently_used_files(file_descriptor);
 	if (f == NULL) {
 		lock_release(&file_resource_lock);
 		return SYSCALL_ERROR;
 	}
+
 	int bytes = file_read(f, buffer, size_to_be_read);
+
 	lock_release(&file_resource_lock);
 	return bytes;
 }
 
-// Write to standard output
-int write_to_standard_output(void *buffer, unsigned size_to_be_read) {
-	putbuf(buffer, size_to_be_read);
-	return size_to_be_read;
-}
-
-// Writes to file
-int write_to_file(int file_descriptor, void *buffer, unsigned size_to_be_read) {
-	lock_acquire(&file_resource_lock);
-	struct file *f = get_file_from_currently_used_files(file_descriptor);
-	if (f == NULL) {
-		lock_release(&file_resource_lock);
-		return SYSCALL_ERROR;
-	}
-	int bytes = file_write(f, buffer, size_to_be_read);
-	lock_release(&file_resource_lock);
-	return bytes;
-}
-
-// Performs actions after file is opened
-int perform_actions_after_file_open(struct file *file_) {
-	if (file_ == NULL) {
-		return SYSCALL_ERROR;
-	}
-	int file_descriptor = add_file_to_currently_used_files(file_);
-	return file_descriptor;
-}
-
-// Retrieves the system call parameters
-void retrieve_syscall_param(struct intr_frame *f, int *arg,
-		int number_of_parameters) {
-	int i;
-	int *ptr;
-
-	for (i = 0; i < number_of_parameters; i++) {
-		ptr = f->esp + i * sizeof(char *) + sizeof(char *);
-		is_virtual_addr_valid((const void *) ptr);
-		arg[i] = *ptr;
+/**
+ * Checks if a given virtual address is valid.
+ */
+void is_virtual_addr_valid(const void *virtual_addr) {
+	if (virtual_addr < ((void *) 0x08048000) || !is_user_vaddr(virtual_addr)) {
+		exit(SYSCALL_ERROR);
 	}
 }
-// Checks if the buffer is valid.
-void is_memory_mapped(void* buffer, unsigned size) {
-	unsigned i;
-	char* buffer_ = (char *) buffer;
-	for (i = 0; i < size; i++, buffer_++) {
-		is_virtual_addr_valid((const void*) buffer_);
+
+// Returns the physical address corresponding to the give virtual address.
+//	If physical addressed is unmapped, this function will call exit().
+int get_physicaladdr(const void *virtual_addr) {
+	is_virtual_addr_valid(virtual_addr);
+
+	void *physical_addr = pagedir_get_page(thread_current()->pagedir,virtual_addr);
+
+	if (physical_addr == NULL) {
+		exit(SYSCALL_ERROR);
 	}
+
+	return (int) physical_addr;
+}
+
 }
