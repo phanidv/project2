@@ -28,7 +28,7 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
@@ -67,19 +67,15 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
+  /* If load failed, quit. */
   //Checking if the file has been successfully loaded and setting the load_status flag accordingly
-  if (success) {
-
-	  thread_current()->my_position_in_parent_children->load_status = SUCESSFUL_LOAD;
-  } else {
+  palloc_free_page (file_name);
+  if (!success) {
 
 	  thread_current()->my_position_in_parent_children->load_status = FAILED_LOAD;
+	  thread_exit ();
   }
-
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  thread_current()->my_position_in_parent_children->load_status = SUCESSFUL_LOAD;
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -100,7 +96,7 @@ start_process (void *file_name_)
  *
  */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid UNUSED)
 {
 	// Gets the thread corresponding to the input tid
 	struct spawned_child_thread* child_process = retrieve_child(child_tid);
@@ -117,6 +113,7 @@ process_wait (tid_t child_tid UNUSED)
 
 		barrier();
 	}
+
 	//return the status of the child process
 	int status = child_process->status_value;
 
@@ -127,10 +124,8 @@ process_wait (tid_t child_tid UNUSED)
 }
 
 /* Free the current process's resources. */
-void
-process_exit (void)
-{
-	struct thread *cur = thread_current ();
+void process_exit(void) {
+	struct thread *cur = thread_current();
 	uint32_t *pd;
 
 	//close all the files opened by the current process
@@ -139,9 +134,10 @@ process_exit (void)
 	//delete and free up all the children
 	delete_child_all_or_one(true, NULL);
 
-	//set the exit flag if already killed by the kernel
+	//checking if the parent is alive
 	if (is_thread_alive(cur->parent_tid)) {
 
+		//if alive, set the flag that the current process has exited
 		cur->my_position_in_parent_children->has_exited = true;
 	}
 
@@ -250,8 +246,9 @@ static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
+static void setup_args_on_stack(const char** file_name, void*** esp);
 static void push_onto_stack(void **ptr, char *value, int size_of_value);
-static void resize_array_memory(char **arr, int *capacity);
+static int resize_array_memory(char **arr, int capacity);
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
@@ -269,7 +266,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
-  if (t->pagedir == NULL) 
+  if (t->pagedir == NULL)
     goto done;
   process_activate ();
 
@@ -288,10 +285,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Open executable file. */
   file = filesys_open (file_name_copy);
-  if (file == NULL) 
+  if (file == NULL)
     {
       printf ("load: %s: open failed\n", file_name_copy);
-      goto done; 
+      goto done;
     }
 
   /* Read and verify executable header. */
@@ -301,15 +298,15 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_machine != 3
       || ehdr.e_version != 1
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
-      || ehdr.e_phnum > 1024) 
+      || ehdr.e_phnum > 1024)
     {
       printf ("load: %s: error loading executable\n", file_name_copy);
-      goto done; 
+      goto done;
     }
 
   /* Read program headers. */
   file_ofs = ehdr.e_phoff;
-  for (i = 0; i < ehdr.e_phnum; i++) 
+  for (i = 0; i < ehdr.e_phnum; i++)
     {
       struct Elf32_Phdr phdr;
 
@@ -320,7 +317,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
         goto done;
       file_ofs += sizeof phdr;
-      switch (phdr.p_type) 
+      switch (phdr.p_type)
         {
         case PT_NULL:
         case PT_NOTE:
@@ -334,7 +331,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
         case PT_SHLIB:
           goto done;
         case PT_LOAD:
-          if (validate_segment (&phdr, file)) 
+          if (validate_segment (&phdr, file))
             {
               bool writable = (phdr.p_flags & PF_W) != 0;
               uint32_t file_page = phdr.p_offset & ~PGMASK;
@@ -349,7 +346,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
                   zero_bytes = (ROUND_UP (page_offset + phdr.p_memsz, PGSIZE)
                                 - read_bytes);
                 }
-              else 
+              else
                 {
                   /* Entirely zero.
                      Don't read anything from disk. */
@@ -388,24 +385,24 @@ static bool install_page (void *upage, void *kpage, bool writable);
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
 static bool
-validate_segment (const struct Elf32_Phdr *phdr, struct file *file) 
+validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 {
   /* p_offset and p_vaddr must have the same page offset. */
-  if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK)) 
-    return false; 
+  if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK))
+    return false;
 
   /* p_offset must point within FILE. */
-  if (phdr->p_offset > (Elf32_Off) file_length (file)) 
+  if (phdr->p_offset > (Elf32_Off) file_length (file))
     return false;
 
   /* p_memsz must be at least as big as p_filesz. */
-  if (phdr->p_memsz < phdr->p_filesz) 
-    return false; 
+  if (phdr->p_memsz < phdr->p_filesz)
+    return false;
 
   /* The segment must not be empty. */
   if (phdr->p_memsz == 0)
     return false;
-  
+
   /* The virtual memory region must both start and end within the
      user address space range. */
   if (!is_user_vaddr ((void *) phdr->p_vaddr))
@@ -446,14 +443,14 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
    or disk read error occurs. */
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
-              uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
+              uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
-  while (read_bytes > 0 || zero_bytes > 0) 
+  while (read_bytes > 0 || zero_bytes > 0)
     {
       /* Calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
@@ -470,15 +467,15 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
           palloc_free_page (kpage);
-          return false; 
+          return false;
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
       /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
+      if (!install_page (upage, kpage, writable))
         {
           palloc_free_page (kpage);
-          return false; 
+          return false;
         }
 
       /* Advance. */
@@ -502,11 +499,104 @@ push_onto_stack(void **ptr, char *value, int size_of_value) {
 /**
  * Doubles the capacity of the character array
  */
-static void
-resize_array_memory(char **arr, int *capacity) {
+static int
+resize_array_memory(char **arr, int capacity) {
 
-	*capacity = *capacity * 2;
-	arr = realloc(arr, *capacity * sizeof(char *));
+	int capacity_ = capacity * 2;
+	arr = realloc(arr, capacity_ * sizeof(char *));
+	return capacity_;
+}
+
+static int
+push_args(char* file_name, void** esp, char** argv) {
+
+	int argv_capacity = DEF_ARR_CAPACITY, argc = 0;
+	char *save_ptr;
+
+	char *token = strtok_r((char *)file_name, " ", &save_ptr);
+	while (token != NULL) {
+
+		if (argc >= argv_capacity) {
+
+			//Resizing the argv array
+			argv_capacity *= 2;
+			argv = realloc(argv, sizeof(char *) * argv_capacity );
+			//argv_capacity = resize_array_memory(argv, argv_capacity);
+		}
+
+		push_onto_stack(esp, token, strlen(token) + 1);
+		argv[argc] = *esp;
+		argc++;
+
+		//retrieving the next token
+		token = strtok_r(NULL, " ", &save_ptr);
+	}
+
+	return argc;
+}
+
+/**
+ * Setups the stack with the arguments from the user function call
+ */
+void setup_args_on_stack(const char** file_name, void*** esp) {
+
+	char **argv = malloc(sizeof(char *) * DEF_ARR_CAPACITY);
+
+	//Pushing args onto stack
+	//push_args(file_name, esp, argv, &argc);
+	int argv_capacity = DEF_ARR_CAPACITY, argc = 0;
+	char* save_ptr;
+	char* token = strtok_r((char*) file_name, " ", &save_ptr);
+	while (token != NULL) {
+
+		if (argc >= argv_capacity) {
+
+			//Resizing the argv array
+			argv_capacity *= 2;
+			argv = realloc(argv, argv_capacity * sizeof(char *));
+		}
+
+		push_onto_stack(esp, token, strlen(token) + 1);
+		argv[argc] = *esp;
+		argc++;
+
+		//retrieving the next token
+		token = strtok_r(NULL, " ", &save_ptr);
+	}
+
+
+	//Padding the stack - for faster access - 4 bytes
+	int word_align_pad = 0;
+	int word_align = (size_t) * esp % 4;
+	if (word_align != 0) {
+
+		push_onto_stack(esp, &word_align_pad, word_align);
+	}
+
+	//Setting the null sentinel onto the stack
+	int null_sentinel = 0;
+	push_onto_stack(esp, &null_sentinel, sizeof(int*));
+
+	//Pushing the addresses of argv elements
+	int i = 0;
+	for (i = argc - 1; i >= 0; i--) {
+
+		push_onto_stack(esp, &argv[i], sizeof(char*));
+	}
+
+	//Pushing argv address onto the stack
+	char* argv_addr = *esp;
+	push_onto_stack(esp, &argv_addr, sizeof(char**));
+
+	//Pushing argc onto the stack
+	push_onto_stack(esp, &argc, sizeof(int*));
+
+	//Pushing fake "return address" onto the stack
+	int fake_return_addr = 0;
+	push_onto_stack(esp, &fake_return_addr, sizeof(int*));
+
+	//Freeing up argv
+	free(argv);
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
@@ -518,7 +608,7 @@ setup_stack (void **esp, const char* file_name)
   bool success = false;
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
+  if (kpage != NULL)
   {
 	  success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
 	  if (success) {
@@ -531,60 +621,7 @@ setup_stack (void **esp, const char* file_name)
 	  }
   }
 
-  int argc = 0, argv_capacity = DEF_ARR_CAPACITY;
-  char *token, *save_ptr;
-  char **argv = malloc(DEF_ARR_CAPACITY * sizeof(char *));
-
-  // Pushing args onto stack
-  for (token = strtok_r (file_name, " ", &save_ptr); token != NULL;
-		  token = strtok_r (NULL, " ", &save_ptr)) {
-
-	  push_onto_stack(esp, token, strlen(token) + 1);
-	  argv[argc] = *esp;
-	  argc++;
-
-	  //Resizing the argv array
-	  if (argc >= argv_capacity) {
-
-		  argv_capacity *= 2;
-		  argv = realloc(argv, argv_capacity * sizeof(char *));
-		  //resize_array_memory(argv, &argv_capacity);
-	  }
-  }
-
-  //Padding word align, if needed - 4 bytes
-  int word_align_pad = 0;
-  int word_align = (size_t) *esp % 4;
-  if (word_align != 0) {
-
-	  //esp needs to be padded
-	  push_onto_stack(esp, &word_align_pad, word_align);
-  }
-
-  //Setting the null sentinel
-  int null_sentinel = 0;
-  push_onto_stack(esp, &null_sentinel, sizeof(int *));
-
-  //Pushing the addresses of argv elements
-  int i = 0;
-  for (i = argc - 1; i>=0; i--) {
-
-	  push_onto_stack(esp, &argv[i], sizeof(char *));
-  }
-
-  //Pushing argv address onto the stack
-  char *argv_addr = *esp;
-  push_onto_stack(esp, &argv_addr, sizeof(char **));
-
-  //Pushing argc onto the stack
-  push_onto_stack(esp, &argc, sizeof(int *));
-
-  //Pushing fake "return address"
-  int fake_return_addr = 0;
-  push_onto_stack(esp, &fake_return_addr, sizeof(int *));
-
-  //Freeing up argv
-  free(argv);
+  setup_args_on_stack(file_name, esp);
 
   return success;
 }
