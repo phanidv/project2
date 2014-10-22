@@ -201,7 +201,17 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 
 	// Add child process to child list
 	t->parent_tid = thread_tid();
-	struct spawned_child_thread *cp = init_child(t->tid);
+
+	struct spawned_child_thread* cp = malloc(
+			sizeof(struct spawned_child_thread));
+
+	cp->process_id = t->tid;
+	cp->load_status = LOAD_NOT_STARTED;
+	cp->is_waiting = false;
+	cp->has_exited = false;
+
+	list_push_back(&thread_current()->children, &cp->elem);
+
 	t->my_position_in_parent_children = cp;
 
 	/* Add to run queue. */
@@ -290,6 +300,21 @@ void thread_exit(void) {
 	thread_current()->status = THREAD_DYING;
 	schedule();
 	NOT_REACHED ();
+}
+
+// Returns true is thread is present in OS. Else returns false. This can be used to check if a thread is dead or not.
+bool is_present_in_kernel(int pid) {
+	struct list_elem *e;
+
+	e = list_begin(&all_list);
+	while (e != list_end(&all_list)) {
+		struct thread *t = list_entry (e, struct thread, allelem);
+		if (t->tid == pid) {
+			return true;
+		}
+		e = list_next(e);
+	}
+	return false;
 }
 
 /* Yields the CPU.  The current thread is not put to sleep and
@@ -541,51 +566,36 @@ static tid_t allocate_tid(void) {
 
 	return tid;
 }
-
+
 /* Offset of `stack' member within `struct thread'.
  Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
-bool is_thread_alive(int pid) {
-	struct list_elem *e;
-
-	for (e = list_begin(&all_list); e != list_end(&all_list);
-			e = list_next(e)) {
-		struct thread *t = list_entry (e, struct thread, allelem);
-		if (t->tid == pid) {
-			return true;
-		}
-	}
-	return false;
-}
-
-struct spawned_child_thread* init_child(int pid) {
-	struct spawned_child_thread* cp = malloc(
-			sizeof(struct spawned_child_thread));
-	cp->process_id = pid;
-	cp->load_status = LOAD_NOT_STARTED;
-	cp->is_waiting = false;
-	cp->has_exited = false;
-	//lock_init(&cp->wait_lock);
-	list_push_back(&thread_current()->children, &cp->elem);
-	return cp;
-}
-
+/*
+ * Retrieves child of current thread with a given process id.
+ *
+ */
 struct spawned_child_thread* retrieve_child(int pid) {
 	struct thread *t = thread_current();
 	struct list_elem *e;
 
-	for (e = list_begin(&t->children); e != list_end(&t->children); e =
-			list_next(e)) {
-		struct spawned_child_thread *cp =
+	e = list_begin(&t->children);
+	while (e != list_end(&t->children)) {
+		struct spawned_child_thread *child_thread =
 				list_entry (e, struct spawned_child_thread, elem);
-		if (pid == cp->process_id) {
-			return cp;
+
+		if (pid == child_thread->process_id) {
+			return child_thread;
 		}
+		e = list_next(e);
 	}
 	return NULL;
 }
 
+/*
+ * Deletes all the children of current thread if all is true. Else deletes just single thread with
+ * spawned_child_thread argument pointer
+ */
 void delete_child_all_or_one(bool all, struct spawned_child_thread *cp) {
 	if (all) {
 		delete_children();
@@ -595,16 +605,22 @@ void delete_child_all_or_one(bool all, struct spawned_child_thread *cp) {
 	}
 }
 
+/*
+ * Deletes all the children of the current thread.
+ */
 void delete_children(void) {
 	struct thread *t = thread_current();
 	struct list_elem *next, *e = list_begin(&t->children);
 
 	while (e != list_end(&t->children)) {
 		next = list_next(e);
+
 		struct spawned_child_thread *cp =
 				list_entry (e, struct spawned_child_thread,
 						elem);
+
 		list_remove(&cp->elem);
+
 		free(cp);
 		e = next;
 	}

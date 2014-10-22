@@ -283,7 +283,7 @@ void sys_close_call(struct intr_frame* f) {
 void exit(int status) {
 
 	struct thread *current_thread = thread_current();
-	if (is_thread_alive(current_thread->parent_tid)) {
+	if (is_present_in_kernel(current_thread->parent_tid)) {
 		current_thread->my_position_in_parent_children->status_value = status;
 	}
 	printf("%s: exit(%d)\n", current_thread->name, status);

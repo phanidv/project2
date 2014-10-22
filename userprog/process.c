@@ -135,7 +135,7 @@ void process_exit(void) {
 	delete_child_all_or_one(true, NULL);
 
 	//checking if the parent is alive
-	if (is_thread_alive(cur->parent_tid)) {
+	if (is_present_in_kernel(cur->parent_tid)) {
 
 		//if alive, set the flag that the current process has exited
 		cur->my_position_in_parent_children->has_exited = true;
