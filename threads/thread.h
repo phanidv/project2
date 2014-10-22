@@ -137,8 +137,13 @@ struct spawned_child_thread {
 	bool is_waiting;
 	int status_value;
 	bool has_exited;
-	//TODO
-//	struct lock wait_lock;
+
+	struct lock wait_lock;
+	struct condition wait_cond;
+
+	struct lock exec_lock;
+	struct condition exec_cond;
+
 	struct list_elem elem;
 };
 

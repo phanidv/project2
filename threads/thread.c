@@ -209,6 +209,10 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 	cp->load_status = LOAD_NOT_STARTED;
 	cp->is_waiting = false;
 	cp->has_exited = false;
+	lock_init(&cp->wait_lock);
+	cond_init(&cp->wait_cond);
+	lock_init(&cp->exec_lock);
+	cond_init(&cp->exec_cond);
 
 	list_push_back(&thread_current()->children, &cp->elem);
 

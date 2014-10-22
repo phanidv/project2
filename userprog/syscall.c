@@ -144,6 +144,10 @@ static void syscall_handler(struct intr_frame *f UNUSED) {
 		sys_close_call(f);
 		break;
 	}
+	default:{
+		exit(SYSCALL_ERROR);
+		break;
+	}
 	}
 }
 
@@ -284,7 +288,14 @@ void exit(int status) {
 
 	struct thread *current_thread = thread_current();
 	if (is_present_in_kernel(current_thread->parent_tid)) {
-		current_thread->my_position_in_parent_children->status_value = status;
+
+		struct spawned_child_thread *my_pos = current_thread->my_position_in_parent_children;
+		my_pos->status_value = status;
+		if (my_pos->is_waiting) {
+			lock_acquire(&my_pos->wait_lock);
+			cond_signal(&my_pos->wait_cond, &my_pos->wait_lock);
+			lock_release(&my_pos->wait_lock);
+		}
 	}
 	printf("%s: exit(%d)\n", current_thread->name, status);
 	thread_exit();
@@ -301,12 +312,15 @@ void exit(int status) {
  */
 pid_t exec(const char *cmd_line) {
 	pid_t pid = process_execute(cmd_line);
-	struct spawned_child_thread* cp = retrieve_child(pid);
-	ASSERT(cp);
-	while (cp->load_status == LOAD_NOT_STARTED) {
-		barrier();
+	struct spawned_child_thread* child_process = retrieve_child(pid);
+	ASSERT(child_process);
+	while (child_process->load_status == LOAD_NOT_STARTED) {
+
+		lock_acquire(&child_process->exec_lock);
+		cond_wait(&child_process->exec_cond, &child_process->exec_lock);
+		lock_release(&child_process->exec_lock);
 	}
-	if (cp->load_status == FAILED_LOAD) {
+	if (child_process->load_status == FAILED_LOAD) {
 		return SYSCALL_ERROR;
 	}
 	return pid;

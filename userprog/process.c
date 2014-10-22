@@ -67,15 +67,23 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
+  struct spawned_child_thread *my_pos = thread_current()->my_position_in_parent_children;
+
   /* If load failed, quit. */
   //Checking if the file has been successfully loaded and setting the load_status flag accordingly
   palloc_free_page (file_name);
   if (!success) {
 
-	  thread_current()->my_position_in_parent_children->load_status = FAILED_LOAD;
+	  my_pos->load_status = FAILED_LOAD;
+	  lock_acquire(&my_pos->exec_lock);
+	  cond_signal(&my_pos->exec_cond, &my_pos->exec_lock);
+	  lock_release(&my_pos->exec_lock);
 	  thread_exit ();
   }
-  thread_current()->my_position_in_parent_children->load_status = SUCESSFUL_LOAD;
+  my_pos->load_status = SUCESSFUL_LOAD;
+  lock_acquire(&my_pos->exec_lock);
+  cond_signal(&my_pos->exec_cond, &my_pos->exec_lock);
+  lock_release(&my_pos->exec_lock);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -111,8 +119,12 @@ process_wait (tid_t child_tid UNUSED)
 	child_process->is_waiting = true;
 	while (!child_process->has_exited) {
 
-		barrier();
+		lock_acquire(&child_process->wait_lock);
+		cond_wait(&child_process->wait_cond, &child_process->wait_lock);
+		lock_release(&child_process->wait_lock);
+		//barrier();
 	}
+	child_process->is_waiting = false;
 
 	//return the status of the child process
 	int status = child_process->status_value;
@@ -542,7 +554,7 @@ void setup_args_on_stack(const char** file_name, void*** esp) {
 
 	char **argv = malloc(sizeof(char *) * DEF_ARR_CAPACITY);
 
-	//Pushing args onto stack
+	// Setup the arguments on the satck
 	//push_args(file_name, esp, argv, &argc);
 	int argv_capacity = DEF_ARR_CAPACITY, argc = 0;
 	char* save_ptr;
@@ -565,7 +577,7 @@ void setup_args_on_stack(const char** file_name, void*** esp) {
 	}
 
 
-	//Padding the stack - for faster access - 4 bytes
+	// Setup padding - for faster access - 4 bytes
 	int word_align_pad = 0;
 	int word_align = (size_t) * esp % 4;
 	if (word_align != 0) {
@@ -573,25 +585,25 @@ void setup_args_on_stack(const char** file_name, void*** esp) {
 		push_onto_stack(esp, &word_align_pad, word_align);
 	}
 
-	//Setting the null sentinel onto the stack
+	//Setting the null sentinel on the stack
 	int null_sentinel = 0;
 	push_onto_stack(esp, &null_sentinel, sizeof(int*));
 
-	//Pushing the addresses of argv elements
+	// Setting up the addresses of argv items
 	int i = 0;
 	for (i = argc - 1; i >= 0; i--) {
 
 		push_onto_stack(esp, &argv[i], sizeof(char*));
 	}
 
-	//Pushing argv address onto the stack
+	// Setting the argv address on the stack
 	char* argv_addr = *esp;
 	push_onto_stack(esp, &argv_addr, sizeof(char**));
 
-	//Pushing argc onto the stack
+	// Setting argc on the stack
 	push_onto_stack(esp, &argc, sizeof(int*));
 
-	//Pushing fake "return address" onto the stack
+	// Spoofing the "return address"
 	int fake_return_addr = 0;
 	push_onto_stack(esp, &fake_return_addr, sizeof(int*));
 
