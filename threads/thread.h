@@ -189,6 +189,6 @@ void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
-bool is_thread_alive(int pid);
+bool is_present_in_kernel(int pid);
 
 #endif /* threads/thread.h */
