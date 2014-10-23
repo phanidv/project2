@@ -22,8 +22,8 @@
  of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
-#define MIN_FD 2
-#define NO_PARENT -1
+#define INITIAL_FILE_DESCRIPTOR 2
+#define DEFAULT_PARENT_ID -1
 
 /* List of processes in THREAD_READY state, that is, processes
  that are ready to run but not actually running. */
@@ -477,11 +477,11 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	list_push_back(&all_list, &t->allelem);
 
 	list_init(&t->currently_used_files);
-	t->current_fd_to_be_assigned = MIN_FD;
+	t->current_fd_to_be_assigned = INITIAL_FILE_DESCRIPTOR;
 
 	list_init(&t->children);
 	t->my_position_in_parent_children = NULL;
-	t->parent_tid = NO_PARENT;
+	t->parent_tid = DEFAULT_PARENT_ID;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
