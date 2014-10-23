@@ -370,7 +370,8 @@ static int resize_array_memory(char **arr, int capacity);
 
 	done:
 	/* We arrive here whether the load is successful or not. */
-	file_close(file);
+	if (!success)
+		file_close(file);
 	return success;
 }
 
