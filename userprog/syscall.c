@@ -224,7 +224,7 @@ void sys_read_call(struct intr_frame* f) {
 
 	void *virtual_buffer = (void *) arg[1];
 	unsigned size = get_size(arg[2]);
-	is_memory_mapped(virtual_buffer, size);
+	is_virtual_addr_valid((const void*) virtual_buffer);
 
 	void *physical_buffer = get_physicaladdr(virtual_buffer);
 	int file_descriptor = get_file_descriptor(arg[0]);
@@ -239,7 +239,7 @@ void sys_write_call(struct intr_frame* f) {
 
 	void *virtual_buffer = (void *) arg[1];
 	unsigned size = get_size(arg[2]);
-	is_memory_mapped(virtual_buffer, size);
+	is_virtual_addr_valid((const void*) virtual_buffer);
 
 	void *physical_buffer = get_physicaladdr(virtual_buffer);
 	int file_descriptor = get_file_descriptor(arg[0]);
@@ -684,13 +684,5 @@ void retrieve_syscall_param(struct intr_frame *f, int *arg,
 		ptr = f->esp + i * sizeof(char *);
 		is_virtual_addr_valid((const void *) ptr);
 		arg[index] = *ptr;
-	}
-}
-// Checks if the buffer is valid.
-void is_memory_mapped(void* buffer, unsigned size) {
-	unsigned i;
-	char* buffer_ = (char *) buffer;
-	for (i = 0; i < size; i++, buffer_++) {
-		is_virtual_addr_valid((const void*) buffer_);
 	}
 }
