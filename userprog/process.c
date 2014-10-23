@@ -112,7 +112,7 @@ int process_wait(tid_t child_tid UNUSED) {
 	// Gets the thread corresponding to the input tid
 	struct spawned_child_thread* child_process = retrieve_child(child_tid);
 
-	//Return "Error" when the child has already been deleted or when the child is already waiting
+	//Return "Error" if the child doesn't exist for that tid or when the child is already waiting
 	if (!child_process || child_process->is_waiting) {
 
 		return SYSCALL_ERROR;
@@ -368,10 +368,9 @@ static int resize_array_memory(char **arr, int capacity);
 
 	success = true;
 
-	done:
+	done:;
 	/* We arrive here whether the load is successful or not. */
-	if (!success)
-		file_close(file);
+
 	return success;
 }
 

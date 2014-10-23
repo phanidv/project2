@@ -73,6 +73,7 @@ static void *alloc_frame(struct thread *, size_t size);
 static void schedule(void);
 void thread_schedule_tail(struct thread *prev);
 static tid_t allocate_tid(void);
+void init_spawned_thread(struct spawned_child_thread *cp, int tid);
 
 /* Initializes the threading system by transforming the code
  that's currently running into a thread.  This can't work in
@@ -205,14 +206,7 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 	struct spawned_child_thread* cp = malloc(
 			sizeof(struct spawned_child_thread));
 
-	cp->process_id = t->tid;
-	cp->load_status = LOAD_NOT_STARTED;
-	cp->is_waiting = false;
-	cp->has_exited = false;
-	lock_init(&cp->wait_lock);
-	cond_init(&cp->wait_cond);
-	lock_init(&cp->exec_lock);
-	cond_init(&cp->exec_cond);
+	init_spawned_thread(cp, t->tid);
 
 	list_push_back(&thread_current()->children, &cp->elem);
 
@@ -222,6 +216,27 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 	thread_unblock(t);
 
 	return tid;
+}
+
+/**
+ *
+ * Initializes the new spawned_child_thread
+ */
+void init_spawned_thread(struct spawned_child_thread *cp, int tid) {
+
+	ASSERT(cp != NULL);
+
+	cp->process_id = tid;
+	cp->load_status = LOAD_NOT_STARTED;
+
+	cp->is_waiting = false;
+	cp->has_exited = false;
+
+	lock_init(&cp->wait_lock);
+	cond_init(&cp->wait_cond);
+
+	lock_init(&cp->exec_lock);
+	cond_init(&cp->exec_cond);
 }
 
 /* Puts the current thread to sleep.  It will not be scheduled
@@ -622,7 +637,6 @@ void delete_children(void) {
 		struct spawned_child_thread *cp =
 				list_entry (e, struct spawned_child_thread,
 						elem);
-
 		list_remove(&cp->elem);
 
 		free(cp);
