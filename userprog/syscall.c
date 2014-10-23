@@ -5,7 +5,6 @@
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/file.h"
-#include "filesys/filesys.h"
 #include "threads/interrupt.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
@@ -650,12 +649,14 @@ int write_to_standard_output(void *buffer, unsigned size_to_be_read) {
 
 // Writes to file
 int write_to_file(int file_descriptor, void *buffer, unsigned size_to_be_read) {
+
 	lock_acquire(&file_resource_lock);
 	struct file *f = get_file_from_currently_used_files(file_descriptor);
-	if (f == NULL) {
+	if ((f == NULL) || check_if_file_write_deny(f)) {
 		lock_release(&file_resource_lock);
 		return SYSCALL_ERROR;
 	}
+
 	int bytes = file_write(f, buffer, size_to_be_read);
 	lock_release(&file_resource_lock);
 	return bytes;
