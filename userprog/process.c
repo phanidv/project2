@@ -149,7 +149,8 @@ void process_exit(void) {
 	delete_child_all_or_one(true, NULL);
 
 	//checking if the parent is alive
-	if (is_present_in_kernel(cur->parent_tid)) {
+	//TODO
+	if (is_present_in_kernel(cur->parent_tid)){ //&& cur->my_position_in_parent_children) {
 
 		//if alive, set the flag that the current process has exited
 		cur->my_position_in_parent_children->has_exited = true;
@@ -261,7 +262,8 @@ static int resize_array_memory(char **arr, int capacity);
 /* Loads an ELF executable from FILE_NAME into the current thread.
  Stores the executable's entry point into *EIP
  and its initial stack pointer into *ESP.
- Returns true if successful, false otherwise. */bool load(const char *file_name,
+ Returns true if successful, false otherwise. */
+bool load(const char *file_name,
 		void (**eip)(void), void **esp) {
 	struct thread *t = thread_current();
 	struct Elf32_Ehdr ehdr;

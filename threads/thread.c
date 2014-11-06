@@ -206,9 +206,11 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 	struct spawned_child_thread* cp = malloc(
 			sizeof(struct spawned_child_thread));
 
-	init_spawned_thread(cp, t->tid);
-
-	list_push_back(&thread_current()->children, &cp->elem);
+	//TODO
+	if(cp){
+		init_spawned_thread(cp, t->tid);
+		list_push_back(&thread_current()->children, &cp->elem);
+	}
 
 	t->my_position_in_parent_children = cp;
 

@@ -72,10 +72,14 @@ static void syscall_handler(struct intr_frame *f UNUSED) {
 	 *
 	 * 0x08048000 is where the code segment starts
 	 */
-	is_virtual_addr_valid((const void*) f->esp);
+	//TODO
+	//is_virtual_addr_valid((const void*) f->esp);
+	int esp_test = get_physicaladdr((const void*) f->esp);
 
 	//get the system call number from esp
-	int system_call_number = *(int *) f->esp;
+	//TODO
+	//int system_call_number = *(int *) f->esp;
+	int system_call_number = *(int *) esp_test;
 
 	switch (system_call_number) {
 	case SYS_HALT: {
@@ -286,7 +290,8 @@ void sys_close_call(struct intr_frame* f) {
 void exit(int status) {
 
 	struct thread *current_thread = thread_current();
-	if (is_present_in_kernel(current_thread->parent_tid)) {
+	//TODO
+	if (is_present_in_kernel(current_thread->parent_tid)){// && current_thread->my_position_in_parent_children) {
 
 		struct spawned_child_thread *my_pos = current_thread->my_position_in_parent_children;
 		my_pos->status_value = status;
@@ -313,7 +318,13 @@ void exit(int status) {
 pid_t exec(const char *cmd_line) {
 	pid_t pid = process_execute(cmd_line);
 	struct spawned_child_thread* child_process = retrieve_child(pid);
-	ASSERT(child_process);
+
+	//TODO
+	//ASSERT(child_process);
+	if(!child_process){
+		return SYSCALL_ERROR;
+	}
+
 	while (child_process->load_status == LOAD_NOT_STARTED) {
 
 		lock_acquire(&child_process->exec_lock);
@@ -375,6 +386,9 @@ bool create(const char *file, unsigned initial_size) {
 int open(const char *file) {
 	lock_acquire(&file_resource_lock);
 	struct file *f = filesys_open(file);
+
+	//null check is already in perform_actions_after_file_open
+
 	int file_descriptor = perform_actions_after_file_open(f);
 	lock_release(&file_resource_lock);
 	return file_descriptor;
@@ -501,6 +515,11 @@ int get_physicaladdr(const void *virtual_addr) {
 int add_file_to_currently_used_files(struct file *file_) {
 
 	struct file_details *f_details = malloc(sizeof(struct file_details));
+
+	//TODO
+	if(!f_details){
+		return SYSCALL_ERROR;
+	}
 
 	f_details->file = file_;
 	f_details->file_descriptor = thread_current()->current_fd_to_be_assigned;
@@ -666,7 +685,6 @@ int write_to_file(int file_descriptor, void *buffer, unsigned size_to_be_read) {
 int perform_actions_after_file_open(struct file *file_) {
 
 	if (file_ == NULL) {
-
 		return SYSCALL_ERROR;
 	}
 
