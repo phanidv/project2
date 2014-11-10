@@ -2,32 +2,37 @@
 #define USERPROG_SYSCALL_H
 
 #include "threads/synch.h"
-#include "lib/kernel/list.h"
 
-/*
- * Lock that should be acquired to perform any file operations.
- */
+#define CLOSE_ALL -1
+#define ERROR -1
+
+#define NOT_LOADED 0
+#define LOAD_SUCCESS 1
+#define LOAD_FAIL 2
+
+#define USER_VADDR_BOTTOM ((void *) 0x08048000)
+#define STACK_HEURISTIC 32
+
 struct lock file_resource_lock;
 
-// The default error code to be returned when some error occurs while executing system calls.
-typedef enum {
-	SYSCALL_ERROR = -1
-} error_code;
-
-// The struct that holds the details of a file.
-struct file_details {
-	// The file descriptor
-	int file_descriptor;
-	// An open file.
-	struct file *file;
-
-	// list_elem that will be present in thread's list of currently used files.
-	struct list_elem elem;
+struct child_process {
+  int pid;
+  int load;
+  bool wait;
+  bool exit;
+  int status;
+  struct semaphore load_sema;
+  struct semaphore exit_sema;
+  struct list_elem elem;
 };
 
+struct child_process* add_child_process (int pid);
+struct child_process* get_child_process (int pid);
+void remove_child_process (struct child_process *cp);
+void remove_child_processes (void);
 
-void syscall_init(void);
-int add_file_to_currently_used_files(struct file *file_);
-struct file* get_file_from_currently_used_files(int file_descriptor);
+void process_close_file (int fd);
+
+void syscall_init (void);
 
 #endif /* userprog/syscall.h */
