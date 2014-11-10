@@ -1,0 +1,5 @@
+# build file ignore#
+###################
+/userprog/build/
+/vm/build/
+/threads/build/
