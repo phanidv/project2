@@ -317,6 +317,10 @@ void thread_exit(void) {
 	 and schedule another process.  That process will destroy us
 	 when it calls thread_schedule_tail(). */
 	intr_disable();
+
+	//TODO
+	release_locks();
+	//****
 	list_remove(&thread_current()->allelem);
 	thread_current()->status = THREAD_DYING;
 	schedule();
@@ -484,6 +488,13 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	list_init(&t->children);
 	t->my_position_in_parent_children = NULL;
 	t->parent_tid = DEFAULT_PARENT_ID;
+
+	//TODO
+	list_init(&t->lock_list);
+	list_init(&t->mmap_list);
+	t->mapid = 0;
+
+	//*****
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -645,3 +656,21 @@ void delete_children(void) {
 		e = next;
 	}
 }
+
+
+//TODO
+void release_locks (void)
+{
+  struct thread *t = thread_current();
+  struct list_elem *next, *e = list_begin(&t->lock_list);
+
+  while (e != list_end (&t->lock_list))
+    {
+      next = list_next(e);
+      struct lock *l = list_entry (e, struct lock, elem);
+      lock_release(l);
+      list_remove(&l->elem);
+      e = next;
+    }
+}
+//***

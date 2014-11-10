@@ -2,6 +2,12 @@
 #define USERPROG_SYSCALL_H
 
 #include "threads/synch.h"
+#include "lib/kernel/list.h"
+
+/*
+ * Lock that should be acquired to perform any file operations.
+ */
+struct lock file_resource_lock;
 
 // The default error code to be returned when some error occurs while executing system calls.
 typedef enum {
@@ -19,6 +25,9 @@ struct file_details {
 	struct list_elem elem;
 };
 
+
 void syscall_init(void);
+int add_file_to_currently_used_files(struct file *file_);
+struct file* get_file_from_currently_used_files(int file_descriptor);
 
 #endif /* userprog/syscall.h */

@@ -12,9 +12,8 @@
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
-
-int add_file_to_currently_used_files(struct file *file_);
-struct file* get_file_from_currently_used_files(int file_descriptor);
+#include "vm/frame.h"
+#include "vm/page.h"
 
 static void syscall_handler(struct intr_frame *);
 int get_physicaladdr(const void *virtual_addr);
@@ -50,11 +49,10 @@ void sys_tell_call(struct intr_frame* f);
 void sys_close_call(struct intr_frame* f);
 // End - Syscall declarations
 
-/*
- * Lock that should be acquired to perform any file operations.
- */
-struct lock file_resource_lock;
 
+//TODO
+struct sup_page_entry* check_valid_ptr(const void *vaddr, void* esp);
+//******
 void syscall_init(void) {
 	// Initializing the lock.
 	lock_init(&file_resource_lock);
@@ -147,12 +145,66 @@ static void syscall_handler(struct intr_frame *f UNUSED) {
 		sys_close_call(f);
 		break;
 	}
-	default:{
+
+		//TODO
+	case SYS_MMAP: {
+		int arg[2];
+		retrieve_syscall_param(f, &arg[0], 2);
+		f->eax = mmap(arg[0], (void *) arg[1]);
+		break;
+	}
+	case SYS_MUNMAP: {
+		int arg[1];
+		retrieve_syscall_param(f, &arg[0], 1);
+		munmap(arg[0]);
+		break;
+	}
+		//******
+
+	default: {
 		exit(SYSCALL_ERROR);
 		break;
 	}
 	}
+	//TODO
+	unpin_ptr(f->esp);
+	//*****
 }
+
+// TODO
+int mmap(int fd, void *addr) {
+	struct file *old_file = get_file_from_currently_used_files(fd);
+	if (!old_file || !is_user_vaddr(addr) || addr < 0x08048000
+			|| ((uint32_t) addr % PGSIZE) != 0) {
+		return SYSCALL_ERROR;
+	}
+	struct file *file = file_reopen(old_file);
+	if (!file || file_length(old_file) == 0) {
+		return SYSCALL_ERROR;
+	}
+	thread_current()->mapid++;
+	int32_t ofs = 0;
+	uint32_t read_bytes = file_length(file);
+	while (read_bytes > 0) {
+		uint32_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+		uint32_t page_zero_bytes = PGSIZE - page_read_bytes;
+		if (!add_mmap_to_page_table(file, ofs, addr, page_read_bytes,
+				page_zero_bytes)) {
+			munmap(thread_current()->mapid);
+			return SYSCALL_ERROR;
+		}
+		read_bytes -= page_read_bytes;
+		ofs += page_read_bytes;
+		addr += PGSIZE;
+	}
+	return thread_current()->mapid;
+}
+
+void munmap(int mapping) {
+	process_remove_mmap(mapping);
+}
+
+//********************
 
 /*
  * This is the OS shutdown
@@ -176,7 +228,16 @@ void sys_exec_call(struct intr_frame* f) {
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
 	const char *file = get_physical_file(arg[0]);
+
+	//TODO
+	check_valid_string((const void *) arg[0], f->esp);
+	//**************
 	f->eax = exec(file);
+
+	//TODO
+	unpin_string((void *) arg[0]);
+	//**************
+
 }
 
 void sys_wait_call(struct intr_frame* f) {
@@ -193,7 +254,15 @@ void sys_create_call(struct intr_frame* f) {
 	retrieve_syscall_param(f, &arg[0], 2);
 	const char *file = get_physical_file(arg[0]);
 	unsigned initial_size = get_size(arg[1]);
+
+	//TODO
+	check_valid_string((const void *) arg[0], f->esp);
+	//**************
 	f->eax = create(file, initial_size);
+
+	//TODO
+	unpin_string((void *) arg[0]);
+	//**************
 }
 
 void sys_remove_call(struct intr_frame* f) {
@@ -201,6 +270,11 @@ void sys_remove_call(struct intr_frame* f) {
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
 	const char *file = get_physical_file(arg[0]);
+
+	//TODO
+	check_valid_string((const void *) arg[0], f->esp);
+	//**************
+
 	f->eax = remove(file);
 }
 
@@ -209,7 +283,16 @@ void sys_open_call(struct intr_frame* f) {
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
 	const char *file = get_physical_file(arg[0]);
+
+	//TODO
+	check_valid_string((const void *) arg[0], f->esp);
+	//**************
+
 	f->eax = open(file);
+	//TODO
+	unpin_string((void *) arg[0]);
+	//**************
+
 }
 
 void sys_filesize_call(struct intr_frame* f) {
@@ -233,7 +316,14 @@ void sys_read_call(struct intr_frame* f) {
 	void *physical_buffer = get_physicaladdr(virtual_buffer);
 	int file_descriptor = get_file_descriptor(arg[0]);
 
+	//TODO
+	check_valid_buffer((void *) arg[1], (unsigned) arg[2], f->esp, true);
+	//*****
 	f->eax = read(file_descriptor, physical_buffer, size);
+
+	//TODO
+	unpin_buffer((void *) arg[1], (unsigned) arg[2]);
+	//*****
 }
 
 void sys_write_call(struct intr_frame* f) {
@@ -248,7 +338,14 @@ void sys_write_call(struct intr_frame* f) {
 	void *physical_buffer = get_physicaladdr(virtual_buffer);
 	int file_descriptor = get_file_descriptor(arg[0]);
 
+	//TODO
+	check_valid_buffer((void *) arg[1], (unsigned) arg[2], f->esp, true);
+	//*****
 	f->eax = write(file_descriptor, physical_buffer, size);
+
+	//TODO
+	unpin_buffer((void *) arg[1], (unsigned) arg[2]);
+	//*****
 }
 
 void sys_seek_call(struct intr_frame* f) {
@@ -291,9 +388,10 @@ void exit(int status) {
 
 	struct thread *current_thread = thread_current();
 	//TODO
-	if (is_present_in_kernel(current_thread->parent_tid)){// && current_thread->my_position_in_parent_children) {
+	if (is_present_in_kernel(current_thread->parent_tid)) { // && current_thread->my_position_in_parent_children) {
 
-		struct spawned_child_thread *my_pos = current_thread->my_position_in_parent_children;
+		struct spawned_child_thread *my_pos =
+				current_thread->my_position_in_parent_children;
 		my_pos->status_value = status;
 		if (my_pos->is_waiting) {
 
@@ -321,7 +419,7 @@ pid_t exec(const char *cmd_line) {
 
 	//TODO
 	//ASSERT(child_process);
-	if(!child_process){
+	if (!child_process) {
 		return SYSCALL_ERROR;
 	}
 
@@ -361,8 +459,7 @@ int wait(pid_t pid) {
 
 /**
  *Creates a new file called file initially initial_size bytes in size. Returns true if successful, false otherwise.
- */
-bool create(const char *file, unsigned initial_size) {
+ */bool create(const char *file, unsigned initial_size) {
 	lock_acquire(&file_resource_lock);
 	bool success = filesys_create(file, initial_size);
 	lock_release(&file_resource_lock);
@@ -517,7 +614,7 @@ int add_file_to_currently_used_files(struct file *file_) {
 	struct file_details *f_details = malloc(sizeof(struct file_details));
 
 	//TODO
-	if(!f_details){
+	if (!f_details) {
 		return SYSCALL_ERROR;
 	}
 
@@ -624,7 +721,8 @@ struct file_details* find_file_details(struct thread *t, int file_descriptor) {
 // Returns the file pointer
 char* get_physical_file(int file_syscall_parameter) {
 
-	return (const char *) get_physicaladdr((const void *) file_syscall_parameter);
+	return (const char *) get_physicaladdr(
+			(const void *) file_syscall_parameter);
 }
 
 // returns the size as unsidned value.
@@ -704,3 +802,71 @@ void retrieve_syscall_param(struct intr_frame *f, int *arg,
 		arg[index] = *ptr;
 	}
 }
+
+//TODO
+
+void check_valid_buffer(void* buffer, unsigned size, void* esp, bool to_write) {
+	unsigned i;
+	char* local_buffer = (char *) buffer;
+	for (i = 0; i < size; i++) {
+		struct sup_page_entry *spte = check_valid_ptr(
+				(const void*) local_buffer, esp);
+		if (spte && to_write) {
+			if (!spte->writable) {
+				exit(SYSCALL_ERROR);
+			}
+		}
+		local_buffer++;
+	}
+}
+
+void check_valid_string(const void* str, void* esp) {
+	check_valid_ptr(str, esp);
+	while (*(char *) str != 0) {
+		str = (char *) str + 1;
+		check_valid_ptr(str, esp);
+	}
+}
+
+void unpin_ptr(void* vaddr) {
+	struct sup_page_entry *spte = get_spte(vaddr);
+	if (spte) {
+		spte->pinned = false;
+	}
+}
+
+void unpin_string(void* str) {
+	unpin_ptr(str);
+	while (*(char *) str != 0) {
+		str = (char *) str + 1;
+		unpin_ptr(str);
+	}
+}
+
+void unpin_buffer(void* buffer, unsigned size) {
+	unsigned i;
+	char* local_buffer = (char *) buffer;
+	for (i = 0; i < size; i++) {
+		unpin_ptr(local_buffer);
+		local_buffer++;
+	}
+}
+
+struct sup_page_entry* check_valid_ptr(const void *vaddr, void* esp) {
+	if (!is_user_vaddr(vaddr) || vaddr < 0x08048000) {
+		exit(SYSCALL_ERROR);
+	}
+	bool load = false;
+	struct sup_page_entry *spte = get_spte((void *) vaddr);
+	if (spte) {
+		load_page(spte);
+		load = spte->is_loaded;
+	} else if (vaddr >= esp - 32) {
+		load = grow_stack((void *) vaddr);
+	}
+	if (!load) {
+		exit(SYSCALL_ERROR);
+	}
+	return spte;
+}
+//***********

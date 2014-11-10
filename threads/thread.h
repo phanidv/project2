@@ -3,6 +3,8 @@
 
 #include <debug.h>
 #include <list.h>
+#include <hash.h>
+
 #include <stdint.h>
 #include <threads/synch.h>
 
@@ -115,6 +117,17 @@ struct thread {
 	// List files used by the thread
 	struct list currently_used_files;
 
+	//TODO
+
+    // Needed to keep track of locks thread holds
+    struct list lock_list;
+
+	struct hash spt;
+
+	struct list mmap_list;
+	int mapid;
+	//******
+
 };
 
 // Status codes of file descriptor
@@ -195,5 +208,9 @@ int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
 bool is_present_in_kernel(int pid);
+
+//TODO
+void release_locks (void);
+//*****
 
 #endif /* threads/thread.h */
