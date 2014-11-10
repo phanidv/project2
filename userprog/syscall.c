@@ -72,12 +72,17 @@ static void syscall_handler(struct intr_frame *f UNUSED) {
 	 */
 	//TODO
 	//is_virtual_addr_valid((const void*) f->esp);
-	int esp_test = get_physicaladdr((const void*) f->esp);
+	//int esp_test = get_physicaladdr((const void*) f->esp);
 
 	//get the system call number from esp
 	//TODO
 	//int system_call_number = *(int *) f->esp;
-	int system_call_number = *(int *) esp_test;
+	//int system_call_number = *(int *) esp_test;
+
+	///TODO
+	check_valid_ptr((const void*) f->esp, f->esp);
+	int system_call_number = *(int *) f->esp;
+
 
 	switch (system_call_number) {
 	case SYS_HALT: {
@@ -227,12 +232,12 @@ void sys_exec_call(struct intr_frame* f) {
 
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
-	const char *file = get_physical_file(arg[0]);
+	//const char *file = get_physical_file(arg[0]);
 
 	//TODO
 	check_valid_string((const void *) arg[0], f->esp);
 	//**************
-	f->eax = exec(file);
+	f->eax = exec((const char *) arg[0]);
 
 	//TODO
 	unpin_string((void *) arg[0]);
@@ -252,13 +257,13 @@ void sys_create_call(struct intr_frame* f) {
 
 	int arg[2];
 	retrieve_syscall_param(f, &arg[0], 2);
-	const char *file = get_physical_file(arg[0]);
-	unsigned initial_size = get_size(arg[1]);
+	//const char *file = get_physical_file(arg[0]);
+	//unsigned initial_size = get_size(arg[1]);
 
 	//TODO
 	check_valid_string((const void *) arg[0], f->esp);
 	//**************
-	f->eax = create(file, initial_size);
+	f->eax = create((const char *)arg[0], (unsigned) arg[1]);
 
 	//TODO
 	unpin_string((void *) arg[0]);
@@ -269,26 +274,26 @@ void sys_remove_call(struct intr_frame* f) {
 
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
-	const char *file = get_physical_file(arg[0]);
+	//const char *file = get_physical_file(arg[0]);
 
 	//TODO
 	check_valid_string((const void *) arg[0], f->esp);
 	//**************
 
-	f->eax = remove(file);
+	f->eax = remove((const char *) arg[0]);
 }
 
 void sys_open_call(struct intr_frame* f) {
 
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
-	const char *file = get_physical_file(arg[0]);
+	//const char *file = get_physical_file(arg[0]);
 
 	//TODO
 	check_valid_string((const void *) arg[0], f->esp);
 	//**************
 
-	f->eax = open(file);
+	f->eax = open((const char *) arg[0]);
 	//TODO
 	unpin_string((void *) arg[0]);
 	//**************
@@ -299,9 +304,9 @@ void sys_filesize_call(struct intr_frame* f) {
 
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
-	int file_descriptor = get_file_descriptor(arg[0]);
+	//int file_descriptor = get_file_descriptor(arg[0]);
 
-	f->eax = filesize(file_descriptor);
+	f->eax = filesize(arg[0]);
 }
 
 void sys_read_call(struct intr_frame* f) {
@@ -309,17 +314,17 @@ void sys_read_call(struct intr_frame* f) {
 	int arg[3];
 	retrieve_syscall_param(f, &arg[0], 3);
 
-	void *virtual_buffer = (void *) arg[1];
+	/*void *virtual_buffer = (void *) arg[1];
 	unsigned size = get_size(arg[2]);
 	is_virtual_addr_valid((const void*) virtual_buffer);
 
 	void *physical_buffer = get_physicaladdr(virtual_buffer);
-	int file_descriptor = get_file_descriptor(arg[0]);
+	int file_descriptor = get_file_descriptor(arg[0]);*/
 
 	//TODO
 	check_valid_buffer((void *) arg[1], (unsigned) arg[2], f->esp, true);
 	//*****
-	f->eax = read(file_descriptor, physical_buffer, size);
+	f->eax = read(arg[0], (void *) arg[1], (unsigned) arg[2]);
 
 	//TODO
 	unpin_buffer((void *) arg[1], (unsigned) arg[2]);
@@ -331,17 +336,18 @@ void sys_write_call(struct intr_frame* f) {
 	int arg[3];
 	retrieve_syscall_param(f, &arg[0], 3);
 
-	void *virtual_buffer = (void *) arg[1];
+	/*void *virtual_buffer = (void *) arg[1];
 	unsigned size = get_size(arg[2]);
 	is_virtual_addr_valid((const void*) virtual_buffer);
 
 	void *physical_buffer = get_physicaladdr(virtual_buffer);
-	int file_descriptor = get_file_descriptor(arg[0]);
+	int file_descriptor = get_file_descriptor(arg[0]);*/
 
 	//TODO
 	check_valid_buffer((void *) arg[1], (unsigned) arg[2], f->esp, true);
 	//*****
-	f->eax = write(file_descriptor, physical_buffer, size);
+	f->eax = write(arg[0], (const void *) arg[1],
+		       (unsigned) arg[2]);
 
 	//TODO
 	unpin_buffer((void *) arg[1], (unsigned) arg[2]);
@@ -353,10 +359,10 @@ void sys_seek_call(struct intr_frame* f) {
 	int arg[2];
 	retrieve_syscall_param(f, &arg[0], 2);
 
-	int file_descriptor = get_file_descriptor(arg[0]);
-	unsigned position = (unsigned) arg[1];
+	/*int file_descriptor = get_file_descriptor(arg[0]);
+	unsigned position = (unsigned) arg[1];*/
 
-	seek(file_descriptor, position);
+	seek(arg[0], (unsigned) arg[1]);
 }
 
 void sys_tell_call(struct intr_frame* f) {
@@ -364,19 +370,19 @@ void sys_tell_call(struct intr_frame* f) {
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
 
-	int file_descriptor = get_file_descriptor(arg[0]);
+	/*int file_descriptor = get_file_descriptor(arg[0]);*/
 
-	f->eax = tell(file_descriptor);
+	f->eax = tell(arg[0]);
 }
 
 void sys_close_call(struct intr_frame* f) {
 
 	int arg[1];
-	retrieve_syscall_param(f, &arg[0], 1);
+	retrieve_syscall_param(f, &arg[0], 1);/*
 
-	int file_descriptor = get_file_descriptor(arg[0]);
+	int file_descriptor = get_file_descriptor(arg[0]);*/
 
-	close(file_descriptor);
+	close(arg[0]);
 }
 
 /*
@@ -798,7 +804,9 @@ void retrieve_syscall_param(struct intr_frame *f, int *arg,
 	int index = 0;
 	for (i = 1; i <= number_of_parameters; i++, index++) {
 		ptr = f->esp + i * sizeof(char *);
-		is_virtual_addr_valid((const void *) ptr);
+		//TODO
+	    check_valid_ptr((const void *) ptr, f->esp);
+	    //************
 		arg[index] = *ptr;
 	}
 }

@@ -28,7 +28,7 @@ static void change_load_status(struct spawned_child_thread *child_thread,
 		load_status status);
 
 // Value that will be checked to ensure stackoverflow doesn't happen.
-#define STACK_LOWER_LIMIT (PHYS_BASE - sizeof(char *) * 1024)
+//#define STACK_LOWER_LIMIT (PHYS_BASE - sizeof(char *) * 1024)
 
 /* Starts a new thread running a user program loaded from
  FILENAME.  The new thread may be scheduled (and may even exit)
@@ -51,6 +51,9 @@ tid_t process_execute(const char *file_name) {
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create(command, PRI_DEFAULT, start_process, fn_copy);
+	//TODO
+	palloc_free_page(command);
+	//***********
 	if (tid == TID_ERROR)
 		palloc_free_page(fn_copy);
 	return tid;
@@ -62,6 +65,11 @@ static void start_process(void *file_name_) {
 	char *file_name = file_name_;
 	struct intr_frame if_;
 	bool success;
+
+	//TODO
+	// Initialize page table
+	page_table_init(&thread_current()->spt);
+	//******************
 
 	/* Initialize interrupt frame and load executable. */
 	memset(&if_, 0, sizeof if_);
@@ -299,7 +307,7 @@ bool load(const char *file_name,
 	file_name_copy = strtok_r(file_name_copy, " ", &save_ptr);
 
 	/* Open executable file. */
-	file = filesys_open(file_name_copy);
+	file = open(file_name_copy);
 	if (file == NULL) {
 		printf("load: %s: open failed\n", file_name_copy);
 		goto done;
@@ -481,12 +489,8 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
  * Increases the stack pointer and copies the value
  */
 static void push_onto_stack(void **ptr, char *value, int size_of_value) {
-
-	// Push onto stack only if we don't cross stack lower limit.
-	if ((*ptr - size_of_value) > STACK_LOWER_LIMIT) {
-		*ptr -= size_of_value;
-		memcpy(*ptr, value, size_of_value);
-	}
+	*ptr -= size_of_value;
+	memcpy(*ptr, value, size_of_value);
 }
 
 /**
@@ -629,69 +633,70 @@ bool install_page(void *upage, void *kpage, bool writable) {
 //TODO
 bool process_add_mmap (struct sup_page_entry *spte)
 {
-  struct mmap_file *mm = malloc(sizeof(struct mmap_file));
-  if (!mm)
-    {
-      return false;
-    }
-  mm->spte = spte;
-  mm->mapid = thread_current()->mapid;
-  list_push_back(&thread_current()->mmap_list, &mm->elem);
-  return true;
+	struct mmap_file *mm = malloc(sizeof(struct mmap_file));
+	if (!mm)
+	{
+		return false;
+	}
+	mm->spte = spte;
+	mm->mapid = thread_current()->mapid;
+	list_push_back(&thread_current()->mmap_list, &mm->elem);
+	return true;
 }
 
 
 void process_remove_mmap (int mapping)
 {
-  struct thread *t = thread_current();
-  struct list_elem *next, *e = list_begin(&t->mmap_list);
-  struct file *f = NULL;
-  int close = 0;
+	struct thread *t = thread_current();
+	struct list_elem *next, *e = list_begin(&t->mmap_list);
+	struct file *f = NULL;
+	int close = 0;
 
-  while (e != list_end (&t->mmap_list))
-    {
-      next = list_next(e);
-      struct mmap_file *mm = list_entry (e, struct mmap_file, elem);
-      if (mm->mapid == mapping || mapping == -1)
+	while (e != list_end (&t->mmap_list))
 	{
-	  mm->spte->pinned = true;
-	  if (mm->spte->is_loaded)
-	    {
-	      if (pagedir_is_dirty(t->pagedir, mm->spte->uva))
+		next = list_next(e);
+		struct mmap_file *mm = list_entry (e, struct mmap_file, elem);
+		if (mm->mapid == mapping || mapping == -1)
 		{
-		  lock_acquire(&file_resource_lock);
-		  file_write_at(mm->spte->file, mm->spte->uva,
-				mm->spte->read_bytes, mm->spte->offset);
-		  lock_release(&file_resource_lock);
+			mm->spte->pinned = true;
+			if (mm->spte->is_loaded)
+			{
+				if (pagedir_is_dirty(t->pagedir, mm->spte->uva))
+				{
+					lock_acquire(&file_resource_lock);
+					file_write_at(mm->spte->file, mm->spte->uva,
+							mm->spte->read_bytes, mm->spte->offset);
+					lock_release(&file_resource_lock);
+				}
+				frame_free(pagedir_get_page(t->pagedir, mm->spte->uva));
+				pagedir_clear_page(t->pagedir, mm->spte->uva);
+			}
+			if (mm->spte->type != HASH_ERROR)
+			{
+				hash_delete(&t->spt, &mm->spte->elem);
+			}
+			list_remove(&mm->elem);
+			if (mm->mapid != close)
+			{
+				if (f)
+				{
+					lock_acquire(&file_resource_lock);
+					file_close(f);
+					lock_release(&file_resource_lock);
+				}
+				close = mm->mapid;
+				f = mm->spte->file;
+			}
+			free(mm->spte);
+			free(mm);
 		}
-	      frame_free(pagedir_get_page(t->pagedir, mm->spte->uva));
-	      pagedir_clear_page(t->pagedir, mm->spte->uva);
-	    }
-	  if (mm->spte->type != HASH_ERROR)
-	    {
-	      hash_delete(&t->spt, &mm->spte->elem);
-	    }
-	  list_remove(&mm->elem);
-	  if (mm->mapid != close)
-	    {
-	      if (f)
-		{
-		  lock_acquire(&file_resource_lock);
-		  file_close(f);
-		  lock_release(&file_resource_lock);
-		}
-	      close = mm->mapid;
-	      f = mm->spte->file;
-	    }
-	  free(mm->spte);
-	  free(mm);
+		e = next;
 	}
-      e = next;
-    }
-  if (f)
-    {
-      lock_acquire(&file_resource_lock);
-      file_close(f);
-      lock_release(&file_resource_lock);
-    }
+	if (f)
+	{
+		lock_acquire(&file_resource_lock);
+		file_close(f);
+		lock_release(&file_resource_lock);
+	}
+	//*****************
 }
