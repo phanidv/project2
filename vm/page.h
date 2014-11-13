@@ -42,6 +42,8 @@ typedef enum {
  *
  *	is_page_writable = is set to true if the page is writable by the user prog.
  *
+ *	frame_table_entry_ = The corresponding frame table entry.
+ *
  */
 struct supplemental_pte {
 	void *user_virtual_address;
@@ -61,7 +63,6 @@ struct supplemental_pte {
 	bool is_page_writable;
 
 	struct frame_table_entry *frame_table_entry_;
-
 };
 
 /**
