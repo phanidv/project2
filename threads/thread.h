@@ -126,7 +126,7 @@ struct thread
 
     struct hash spt;
 
-    struct list mmap_list;
+    struct list mem_map_list;
     int mapid;
   };
 

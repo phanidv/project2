@@ -15,6 +15,19 @@ typedef enum {
 	SYSCALL_ERROR = -1
 } error_code;
 
+// The struct that holds the details of a map entry.
+struct mem_map_entry {
+
+	// A unique identifier for the entry
+	int map_id;
+
+	// supplemental page table entry
+	struct supplemental_pte *spte;
+
+	// list_elem that will be present in thread's list of currently used mem maps.
+	struct list_elem elem;
+};
+
 // The struct that holds the details of a file.
 struct file_details {
 	// The file descriptor

@@ -641,7 +641,7 @@ struct supplemental_pte* validate_pointer(const void *vaddr, void* esp) {
 	struct supplemental_pte *spte = get_supplemental_pte((void *) vaddr);
 	if (spte) {
 
-		supplemental_page_table_handler(spte);
+		load_file_from_swap_or_disk(spte);
 		load = spte->is_page_loaded;
 	} else if (vaddr >= esp - STACK_HEURISTIC) {
 

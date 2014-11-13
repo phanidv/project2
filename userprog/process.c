@@ -23,7 +23,7 @@
 #include "vm/page.h"
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp, char** save_ptr);
+static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static void change_load_status(struct spawned_child_thread *child_thread,
 		load_status status);
 
@@ -45,18 +45,17 @@ process_execute (const char *file_name)
 	strlcpy (fn_copy, file_name, PGSIZE);
 
 	// Retrieves the command name to be executed
-	//char *save_ptr;
-	char *parsed_fn = palloc_get_page (0);
-	if (parsed_fn == NULL)
+	char *command = palloc_get_page (0);
+	if (command == NULL)
 		return TID_ERROR;
-	strlcpy (parsed_fn, file_name, PGSIZE);
+	strlcpy (command, file_name, PGSIZE);
 
 	char *save_ptr;
-	parsed_fn = strtok_r((char *) parsed_fn, " ", &save_ptr);
+	command = strtok_r((char *) command, " ", &save_ptr);
 
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (parsed_fn, PRI_DEFAULT, start_process, fn_copy);
-	palloc_free_page(parsed_fn);
+	tid = thread_create(command, PRI_DEFAULT, start_process, fn_copy);
+	palloc_free_page(command);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -71,9 +70,9 @@ start_process (void *file_name_)
 	struct intr_frame if_;
 	bool success;
 
-	// Get actual file name (first parsed token)
+	/*// Get actual file name (first parsed token)
 	char *save_ptr;
-	file_name = strtok_r(file_name, " ", &save_ptr);
+	file_name = strtok_r(file_name, " ", &save_ptr);*/
 
 	// Initialize page table
 	init_sup_page_table(&thread_current()->spt);
@@ -83,7 +82,8 @@ start_process (void *file_name_)
 	if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
 	if_.cs = SEL_UCSEG;
 	if_.eflags = FLAG_IF | FLAG_MBS;
-	success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
+	//success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
+	success = load (file_name, &if_.eip, &if_.esp);
 	struct spawned_child_thread *my_pos =
 			thread_current()->my_position_in_parent_children;
 
@@ -174,7 +174,7 @@ void process_exit(void) {
 		cur->my_position_in_parent_children->has_exited = true;
 	}
 
-	process_remove_mmap(PROCESS_EXIT);
+	delete_mem_map_entry(PROCESS_EXIT);
 	destroy_sup_page_table(&cur->spt);
 
 	/* Destroy the current process's page directory and switch back
@@ -275,11 +275,11 @@ struct Elf32_Phdr
 //for setup_stack
 #define DEF_ARR_CAPACITY 10
 
-static bool setup_stack(void **esp, const char* file_name, char** save_ptr);
+static bool setup_stack(void **esp, const char* file_name);
 static bool validate_segment(const struct Elf32_Phdr *, struct file *);
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes, bool writable);
-static void setup_args_on_stack(const char** file_name, void*** esp, char** save_ptr);
+static void setup_args_on_stack(const char** file_name, void*** esp);
 static void push_onto_stack(void **ptr, char *value, int size_of_value);
 static int resize_array_memory(char **arr, int capacity);
 
@@ -288,7 +288,7 @@ static int resize_array_memory(char **arr, int capacity);
  and its initial stack pointer into *ESP.
  Returns true if successful, false otherwise. */
 bool load(const char *file_name,
-		void (**eip)(void), void **esp, char** save_ptr) {
+		void (**eip)(void), void **esp) {
 	struct thread *t = thread_current ();
 	struct Elf32_Ehdr ehdr;
 	struct file *file = NULL;
@@ -302,29 +302,23 @@ bool load(const char *file_name,
 		goto done;
 	process_activate ();
 
-	/*char *file_name_copy;
+	/* Make a copy of FILE_NAME.
+	     Otherwise there's a race between the caller and load(). */
+	char *file_name_copy = palloc_get_page(0);
+	if (file_name_copy == NULL)
+		return TID_ERROR;
+	strlcpy(file_name_copy, file_name, PGSIZE);
 
-   Make a copy of FILE_NAME.
-  	 Otherwise there's a race between the caller and load().
-  file_name_copy = palloc_get_page(0);
-  if (file_name_copy == NULL)
-	  return TID_ERROR;
-
-  strlcpy(file_name_copy, file_name, PGSIZE);
-
-  char *save_ptr;
-  file_name_copy = strtok_r(file_name_copy, " ", &save_ptr);*/
+	char *save_ptr;
+	file_name_copy = strtok_r(file_name_copy, " ", &save_ptr);
 
 	/* Open executable file. */
 	lock_acquire(&file_resource_lock);
-	file = filesys_open (file_name);
-	//palloc_free_page(file_name_copy);
+	file = filesys_open (file_name_copy);
 	if (file == NULL) {
-		printf("load: %s: open failed\n", file_name);
+		printf("load: %s: open failed\n", file_name_copy);
 		goto done;
 	}
-	//file_deny_write(file);
-	//t->executable = file;
 
 	/* Read and verify executable header. */
 	if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -332,7 +326,7 @@ bool load(const char *file_name,
 			|| ehdr.e_machine != 3 || ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof(struct Elf32_Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf("load: %s: error loading executable\n", file_name);
+		printf("load: %s: error loading executable\n", file_name_copy);
 		goto done;
 	}
 
@@ -390,7 +384,7 @@ bool load(const char *file_name,
 	}
 
 	/* Set up stack. */
-	if (!setup_stack(esp, file_name, save_ptr))
+	if (!setup_stack(esp, file_name))
 		goto done;
 
 	/* Start address. */
@@ -405,6 +399,8 @@ bool load(const char *file_name,
 	add_file_to_currently_used_files(file);
 	done:
 	/* We arrive here whether the load is successful or not. */
+	//freeing up the page allocated to the file_name_copy
+	palloc_free_page(file_name_copy);
 	lock_release(&file_resource_lock);
 	return success;
 }
@@ -482,18 +478,17 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-		//TODO
+		//Loading the file into the memory
 		if (!push_file_in_supplemental_page_table(file, ofs, upage, page_read_bytes,
 				page_zero_bytes, writable)) {
 			return false;
 		}
 
 		/* Advance. */
+		ofs += page_read_bytes;
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
-		ofs += page_read_bytes;
 		upage += PGSIZE;
-		//***************
 	}
 	return true;
 }
@@ -548,19 +543,16 @@ static int push_args(char* file_name, void** esp, char** argv) {
 /**
  * Setups the stack with the arguments from the user function call
  */
-void setup_args_on_stack(const char** file_name, void*** esp, char** save_ptr) {
+void setup_args_on_stack(const char** file_name, void*** esp) {
 
 	char **argv = malloc(sizeof(char *) * DEF_ARR_CAPACITY);
 
 	// Setup the arguments on the satck
 	//push_args(file_name, esp, argv, &argc);
 	int argv_capacity = DEF_ARR_CAPACITY, argc = 0;
-	char *token;
-	//char* save_ptr;
-	//char* token = strtok_r((char*) file_name, " ", &save_ptr);
-	//while (token != NULL) {
-	for (token = (char *) file_name; token != NULL;
-			token = strtok_r (NULL, " ", save_ptr)) {
+	char* save_ptr;
+	char* token = strtok_r((char*) file_name, " ", &save_ptr);
+	while (token != NULL) {
 
 		if (argc >= argv_capacity) {
 
@@ -574,7 +566,7 @@ void setup_args_on_stack(const char** file_name, void*** esp, char** save_ptr) {
 		argc++;
 
 		//retrieving the next token
-		//token = strtok_r(NULL, " ", &save_ptr);
+		token = strtok_r(NULL, " ", &save_ptr);
 	}
 
 	// Setup padding - for faster access - 4 bytes
@@ -613,17 +605,19 @@ void setup_args_on_stack(const char** file_name, void*** esp, char** save_ptr) {
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp, const char* file_name, char** save_ptr)
+setup_stack (void **esp, const char* file_name)
 {
+	//dynamically allocating the stack size
 	bool success = increment_stack_size(((uint8_t *) PHYS_BASE) - PGSIZE);
-	if (success)
+	if (success) {
+
 		*esp = PHYS_BASE;
-	else
-	{
+	} else {
+
 		return success;
 	}
 
-	setup_args_on_stack(file_name, esp, save_ptr);
+	setup_args_on_stack(file_name, esp);
 
 	return success;
 }
@@ -645,74 +639,4 @@ bool install_page(void *upage, void *kpage,
 	 address, then map our page there. */
 	return (pagedir_get_page(t->pagedir, upage) == NULL
 			&& pagedir_set_page(t->pagedir, upage, kpage, writable));
-}
-
-//TODO
-bool process_add_mmap (struct supplemental_pte *spte)
-{
-	struct mmap_file *mm = malloc(sizeof(struct mmap_file));
-	if (!mm)
-	{
-		return false;
-	}
-	mm->spte = spte;
-	mm->mapid = thread_current()->mapid;
-	list_push_back(&thread_current()->mmap_list, &mm->elem);
-	return true;
-}
-
-void process_remove_mmap (int mapping)
-{
-	struct thread *t = thread_current();
-	struct list_elem *next, *e = list_begin(&t->mmap_list);
-	struct file *f = NULL;
-	int close = 0;
-
-	while (e != list_end (&t->mmap_list))
-	{
-		next = list_next(e);
-		struct mmap_file *mm = list_entry (e, struct mmap_file, elem);
-		if (mm->mapid == mapping || mapping == PROCESS_EXIT)
-		{
-			mm->spte->is_page_pinned = true;
-			if (mm->spte->is_page_loaded)
-			{
-				if (pagedir_is_dirty(t->pagedir, mm->spte->user_virtual_address))
-				{
-					lock_acquire(&file_resource_lock);
-					file_write_at(mm->spte->required_file, mm->spte->user_virtual_address,
-							mm->spte->read_bytes, mm->spte->offset);
-					lock_release(&file_resource_lock);
-				}
-				free_frame_table_entry(mm->spte->frame_table_entry_,pagedir_get_page(t->pagedir, mm->spte->user_virtual_address));
-				pagedir_clear_page(t->pagedir, mm->spte->user_virtual_address);
-			}
-			if (mm->spte->table_entry_type != TABLE_ENTRY_ERR)
-			{
-				hash_delete(&t->spt, &mm->spte->sup_pte_elem);
-			}
-			list_remove(&mm->elem);
-			if (mm->mapid != close)
-			{
-				if (f)
-				{
-					lock_acquire(&file_resource_lock);
-					file_close(f);
-					lock_release(&file_resource_lock);
-				}
-				close = mm->mapid;
-				f = mm->spte->required_file;
-			}
-			free(mm->spte);
-			free(mm);
-		}
-		e = next;
-	}
-	if (f)
-	{
-		lock_acquire(&file_resource_lock);
-		file_close(f);
-		lock_release(&file_resource_lock);
-
-	}
 }

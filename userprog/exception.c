@@ -158,7 +158,7 @@ page_fault (struct intr_frame *f)
       struct supplemental_pte *spte = get_supplemental_pte(fault_addr);
       if (spte)
 	{
-	  load = supplemental_page_table_handler(spte);
+	  load = load_file_from_swap_or_disk(spte);
 	  spte->is_page_pinned = false;
 	}
       else if (fault_addr >= f->esp - STACK_HEURISTIC)

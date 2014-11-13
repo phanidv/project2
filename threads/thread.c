@@ -500,7 +500,7 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	list_init(&t->currently_used_files);
 	t->current_fd_to_be_assigned = INITIAL_FILE_DESCRIPTOR;
 
-	list_init(&t->mmap_list);
+	list_init(&t->mem_map_list);
 	t->mapid = 0;
 
 	list_init(&t->children);

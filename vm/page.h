@@ -81,7 +81,7 @@ struct supplemental_pte* create_supplemental_pte(struct file *file, int32_t ofs,
 /**
  * event handler
  */
-bool supplemental_page_table_handler(struct supplemental_pte *sup_pte);
+bool load_file_from_swap_or_disk(struct supplemental_pte *sup_pte);
 
 /**
  * load data into frame from file/swap-space

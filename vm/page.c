@@ -67,11 +67,10 @@ struct supplemental_pte* get_supplemental_pte(void *user_virtual_address) {
 	return NULL;
 }
 
-// TODO
 /**
- * Loads the page into memory either from swap space or disk.
+ * Loads a file into memory either from swap space or disk.
  */
-bool supplemental_page_table_handler(struct supplemental_pte *sup_pte) {
+bool load_file_from_swap_or_disk(struct supplemental_pte *sup_pte) {
 
 	sup_pte->is_page_pinned = true;
 
@@ -212,7 +211,7 @@ bool push_mapped_file_in_supplemental_page_table(struct file *file, int32_t ofs,
 			read_bytes, zero_bytes, MEM_MAPPAED_PAGE, true);
 
 	if (sup_pte) {
-		if (process_add_mmap(sup_pte)) {
+		if (create_mem_map_entry(sup_pte)) {
 			if ((hash_insert(&thread_current()->spt, &sup_pte->sup_pte_elem))) {
 				sup_pte->table_entry_type = TABLE_ENTRY_ERR;
 				return false;
