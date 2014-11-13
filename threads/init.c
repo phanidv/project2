@@ -398,7 +398,7 @@ locate_block_devices (void)
   locate_block_device (BLOCK_SWAP, swap_bdev_name);
 
   //TODO
-  swap_init();
+  initialize_swap_space();
   //**************
 #endif
 }

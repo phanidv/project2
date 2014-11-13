@@ -6,19 +6,33 @@
 #include "threads/vaddr.h"
 #include <bitmap.h>
 
-#define SWAP_FREE 0
-#define SWAP_IN_USE 1
+/**
+ * Number of pages in a sector.
+ */
+#define SECTORS_IN_A_PAGE (PGSIZE / BLOCK_SECTOR_SIZE)
 
-#define SECTORS_PER_PAGE (PGSIZE / BLOCK_SECTOR_SIZE)
+/**
+ * Value that will represent free space in a bitmap.
+ */
+#define FREE_VALUE 0
 
-struct lock swap_lock;
+/**
+ * Block that will represent swap space.
+ */
+struct block *swap_space;
 
-struct block *swap_block;
+/**
+ * Bitmap that will keep the track of free/used space in swap space.
+ */
+struct bitmap *swap_bitmap;
 
-struct bitmap *swap_map;
+/**
+ * Lock that will be used while doing swap related tasks.
+ */
+struct lock swap_block_lock;
 
-void swap_init (void);
-size_t swap_out (void *frame);
-void swap_in (size_t used_index, void* frame);
+void initialize_swap_space (void);
+size_t put_frame_in_swap (void *frame);
+void get_frame_from_swap (size_t used_index, void* frame);
 
 #endif /* vm/swap.h */

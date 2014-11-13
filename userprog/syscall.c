@@ -57,10 +57,10 @@ void sys_mmap_call(struct intr_frame* f);
 void sys_munmap_call(struct intr_frame* f);
 // End - Syscall declarations
 
-struct sup_page_entry* check_valid_ptr (const void *vaddr, void* esp);
+struct supplemental_pte* check_valid_ptr (const void *vaddr, void* esp);
 void check_valid_buffer (void* buffer, unsigned size, void* esp, bool to_write);
 void check_valid_string (const void* str, void* esp);
-void is_page_writable (struct sup_page_entry *spte);
+void is_page_writable (struct supplemental_pte *spte);
 void unpin_ptr (void* vaddr);
 void unpin_string (void* str);
 void unpin_buffer (void* buffer, unsigned size);
@@ -356,7 +356,7 @@ int mmap (int fd, void *addr)
 	{
 		uint32_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
 		uint32_t page_zero_bytes = PGSIZE - page_read_bytes;
-		if (!add_mmap_to_page_table(file, ofs,
+		if (!push_mapped_file_in_supplemental_page_table(file, ofs,
 				addr, page_read_bytes, page_zero_bytes))
 		{
 			munmap(thread_current()->mapid);
@@ -622,22 +622,22 @@ void close(int fd) {
 	lock_release(&file_resource_lock);
 }
 
-struct sup_page_entry* check_valid_ptr(const void *vaddr, void* esp)
+struct supplemental_pte* check_valid_ptr(const void *vaddr, void* esp)
 {
 	if (!is_virtual_addr_valid(vaddr)) {
 
 		exit(SYSCALL_ERROR);
 	}
 	bool load = false;
-	struct sup_page_entry *spte = get_spte((void *) vaddr);
+	struct supplemental_pte *spte = get_supplemental_pte((void *) vaddr);
 	if (spte)
 	{
-		load_page(spte);
-		load = spte->is_loaded;
+		supplemental_page_table_handler(spte);
+		load = spte->is_page_loaded;
 	}
 	else if (vaddr >= esp - STACK_HEURISTIC)
 	{
-		load = grow_stack((void *) vaddr);
+		load = increment_stack_size((void *) vaddr);
 	}
 	if (!load)
 	{
@@ -653,11 +653,11 @@ void check_valid_buffer (void* buffer, unsigned size, void* esp,
 	char* local_buffer = (char *) buffer;
 	for (i = 0; i < size; i++)
 	{
-		struct sup_page_entry *spte = check_valid_ptr((const void*)
+		struct supplemental_pte *spte = check_valid_ptr((const void*)
 				local_buffer, esp);
 		if (spte && to_write)
 		{
-			if (!spte->writable)
+			if (!spte->is_page_writable)
 			{
 				exit(SYSCALL_ERROR);
 			}
@@ -678,10 +678,10 @@ void check_valid_string (const void* str, void* esp)
 
 void unpin_ptr (void* vaddr)
 {
-	struct sup_page_entry *spte = get_spte(vaddr);
+	struct supplemental_pte *spte = get_supplemental_pte(vaddr);
 	if (spte)
 	{
-		spte->pinned = false;
+		spte->is_page_pinned = false;
 	}
 }
 

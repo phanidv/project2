@@ -76,7 +76,7 @@ start_process (void *file_name_)
 	file_name = strtok_r(file_name, " ", &save_ptr);
 
 	// Initialize page table
-	page_table_init(&thread_current()->spt);
+	init_sup_page_table(&thread_current()->spt);
 
 	/* Initialize interrupt frame and load executable. */
 	memset (&if_, 0, sizeof if_);
@@ -175,7 +175,7 @@ void process_exit(void) {
 	}
 
 	process_remove_mmap(PROCESS_EXIT);
-	page_table_destroy(&cur->spt);
+	destroy_sup_page_table(&cur->spt);
 
 	/* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -276,7 +276,6 @@ struct Elf32_Phdr
 #define DEF_ARR_CAPACITY 10
 
 static bool setup_stack(void **esp, const char* file_name, char** save_ptr);
-//static bool install_page(void *upage, void *kpage, bool writable);
 static bool validate_segment(const struct Elf32_Phdr *, struct file *);
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes, bool writable);
@@ -484,7 +483,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		//TODO
-		if (!add_file_to_page_table(file, ofs, upage, page_read_bytes,
+		if (!push_file_in_supplemental_page_table(file, ofs, upage, page_read_bytes,
 				page_zero_bytes, writable)) {
 			return false;
 		}
@@ -616,7 +615,7 @@ void setup_args_on_stack(const char** file_name, void*** esp, char** save_ptr) {
 static bool
 setup_stack (void **esp, const char* file_name, char** save_ptr)
 {
-	bool success = grow_stack(((uint8_t *) PHYS_BASE) - PGSIZE);
+	bool success = increment_stack_size(((uint8_t *) PHYS_BASE) - PGSIZE);
 	if (success)
 		*esp = PHYS_BASE;
 	else
@@ -649,7 +648,7 @@ bool install_page(void *upage, void *kpage,
 }
 
 //TODO
-bool process_add_mmap (struct sup_page_entry *spte)
+bool process_add_mmap (struct supplemental_pte *spte)
 {
 	struct mmap_file *mm = malloc(sizeof(struct mmap_file));
 	if (!mm)
@@ -675,22 +674,22 @@ void process_remove_mmap (int mapping)
 		struct mmap_file *mm = list_entry (e, struct mmap_file, elem);
 		if (mm->mapid == mapping || mapping == PROCESS_EXIT)
 		{
-			mm->spte->pinned = true;
-			if (mm->spte->is_loaded)
+			mm->spte->is_page_pinned = true;
+			if (mm->spte->is_page_loaded)
 			{
-				if (pagedir_is_dirty(t->pagedir, mm->spte->uva))
+				if (pagedir_is_dirty(t->pagedir, mm->spte->user_virtual_address))
 				{
 					lock_acquire(&file_resource_lock);
-					file_write_at(mm->spte->file, mm->spte->uva,
+					file_write_at(mm->spte->required_file, mm->spte->user_virtual_address,
 							mm->spte->read_bytes, mm->spte->offset);
 					lock_release(&file_resource_lock);
 				}
-				frame_free(pagedir_get_page(t->pagedir, mm->spte->uva));
-				pagedir_clear_page(t->pagedir, mm->spte->uva);
+				free_frame_table_entry(mm->spte->frame_table_entry_,pagedir_get_page(t->pagedir, mm->spte->user_virtual_address));
+				pagedir_clear_page(t->pagedir, mm->spte->user_virtual_address);
 			}
-			if (mm->spte->type != HASH_ERROR)
+			if (mm->spte->table_entry_type != TABLE_ENTRY_ERR)
 			{
-				hash_delete(&t->spt, &mm->spte->elem);
+				hash_delete(&t->spt, &mm->spte->sup_pte_elem);
 			}
 			list_remove(&mm->elem);
 			if (mm->mapid != close)
@@ -702,7 +701,7 @@ void process_remove_mmap (int mapping)
 					lock_release(&file_resource_lock);
 				}
 				close = mm->mapid;
-				f = mm->spte->file;
+				f = mm->spte->required_file;
 			}
 			free(mm->spte);
 			free(mm);
@@ -714,5 +713,6 @@ void process_remove_mmap (int mapping)
 		lock_acquire(&file_resource_lock);
 		file_close(f);
 		lock_release(&file_resource_lock);
+
 	}
 }

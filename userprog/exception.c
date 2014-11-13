@@ -155,15 +155,15 @@ page_fault (struct intr_frame *f)
   bool load = false;
   if (not_present && is_virtual_addr_valid(fault_addr))
     {
-      struct sup_page_entry *spte = get_spte(fault_addr);
+      struct supplemental_pte *spte = get_supplemental_pte(fault_addr);
       if (spte)
 	{
-	  load = load_page(spte);
-	  spte->pinned = false;
+	  load = supplemental_page_table_handler(spte);
+	  spte->is_page_pinned = false;
 	}
       else if (fault_addr >= f->esp - STACK_HEURISTIC)
 	{
-	  load = grow_stack(fault_addr);
+	  load = increment_stack_size(fault_addr);
 	}
     }
   if (!load)

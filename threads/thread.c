@@ -101,7 +101,7 @@ thread_init (void)
 	list_init (&all_list);
 
 	//TODO
-	frame_table_init();
+	initialize_frame_table();
 	//*********
 
 	/* Set up a thread structure for the running thread. */
