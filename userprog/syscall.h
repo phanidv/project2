@@ -3,36 +3,32 @@
 
 #include "threads/synch.h"
 
-#define CLOSE_ALL -1
-#define ERROR -1
-
-#define NOT_LOADED 0
-#define LOAD_SUCCESS 1
-#define LOAD_FAIL 2
-
-#define USER_VADDR_BOTTOM ((void *) 0x08048000)
 #define STACK_HEURISTIC 32
 
+/*
+ * Lock that should be acquired to perform any file operations.
+ */
 struct lock file_resource_lock;
 
-struct child_process {
-  int pid;
-  int load;
-  bool wait;
-  bool exit;
-  int status;
-  struct semaphore load_sema;
-  struct semaphore exit_sema;
-  struct list_elem elem;
+// The default error code to be returned when some error occurs while executing system calls.
+typedef enum {
+	SYSCALL_ERROR = -1
+} error_code;
+
+// The struct that holds the details of a file.
+struct file_details {
+	// The file descriptor
+	int file_descriptor;
+	// An open file.
+	struct file *file;
+
+	// list_elem that will be present in thread's list of currently used files.
+	struct list_elem elem;
 };
 
-struct child_process* add_child_process (int pid);
-struct child_process* get_child_process (int pid);
-void remove_child_process (struct child_process *cp);
-void remove_child_processes (void);
-
-void process_close_file (int fd);
-
 void syscall_init (void);
+
+// Closes the file
+void close_file(int fd);
 
 #endif /* userprog/syscall.h */

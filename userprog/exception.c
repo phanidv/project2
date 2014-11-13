@@ -153,8 +153,7 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
   bool load = false;
-  if (not_present && fault_addr > USER_VADDR_BOTTOM &&
-      is_user_vaddr(fault_addr))
+  if (not_present && is_virtual_addr_valid(fault_addr))
     {
       struct sup_page_entry *spte = get_spte(fault_addr);
       if (spte)

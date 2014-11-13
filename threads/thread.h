@@ -5,6 +5,7 @@
 #include <list.h>
 #include <hash.h>
 #include <stdint.h>
+#include <threads/synch.h>
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -102,18 +103,23 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
 
+    // This pointer holds the address of position of this thread in parent's children list.
+    struct spawned_child_thread* my_position_in_parent_children;
+
+    // Maintains a list of spawned children
+    struct list children;
+
+    // UID for each parent
+    tid_t parent_tid;
+
+    // The descriptor of file
+    int current_fd_to_be_assigned;
+
+    // List files used by the thread
+    struct list currently_used_files;
+
     // Needed to keep track of locks thread holds
     struct list lock_list;
-
-    // Needed for file system sys calls
-    struct list file_list;
-    int fd;
-
-    // Needed for wait / exec sys calls
-    struct list child_list;
-    tid_t parent;
-    // Points to child_process struct in parent's child list
-    struct child_process* cp;
 
     // Needed for denying writes to executables
     struct file* executable;
@@ -123,6 +129,50 @@ struct thread
     struct list mmap_list;
     int mapid;
   };
+
+// Status codes of file descriptor
+typedef enum {
+	PROCESS_EXIT = -1,
+	STD_IN = 0,
+	STD_OUT = 1,
+	CANNOT_OPEN_FILE = -1
+} fd_status;
+
+// States of thread
+typedef enum { FAILED_LOAD, LOAD_NOT_STARTED, SUCESSFUL_LOAD} load_status;
+
+// Struct for a new thread created by a parent thread
+struct spawned_child_thread {
+	int process_id;
+	load_status load_status;
+
+	// set to true if the parent thread is waiting on this
+	bool is_waiting;
+
+	// holds the exit status of the thread
+	int status_value;
+
+	// set to true, when the thread exits
+	bool has_exited;
+
+	// condition var and its lock - used for waiting on a child till it exits by its parent
+	struct lock wait_lock;
+	struct condition wait_cond;
+
+	// condition var and its lock - used for waiting by its parent till the child executable loads completely
+	struct lock exec_lock;
+	struct condition exec_cond;
+
+	// holds the elem which gets inserted into parent threads children list
+	struct list_elem elem;
+};
+
+
+// Retrieves child
+struct spawned_child_thread* retrieve_child(int pid);
+
+// If all->true, deletes all children threads; otherwise deletes the given child thread
+void delete_child_all_or_one(bool all, struct spawned_child_thread *cp);
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
