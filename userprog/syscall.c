@@ -16,8 +16,6 @@
 #include "vm/frame.h"
 #include "vm/page.h"
 
-#define MAX_ARGS 3
-
 static void syscall_handler (struct intr_frame *);
 
 int add_file_to_currently_used_files(struct file *file_);
@@ -36,8 +34,10 @@ int read_from_file(int file_descriptor, void *buffer, unsigned size_to_be_read);
 int write_to_standard_output(void *buffer, unsigned size_to_be_read);
 int write_to_file(int file_descriptor, void *buffer, unsigned size_to_be_read);
 int perform_actions_after_file_open(struct file *file_);
-void close_single_file(struct file_details* file_detials);
+void close_single_file(struct file_details* file_details);
 struct file_details* find_file_details(struct thread *t, int file_descriptor);
+bool create_mem_map_entry (struct supplemental_pte *spte);
+void delete_mem_map_entry (int map_id);
 
 // Start - Syscall declarations
 void sys_halt_call(void);
@@ -57,10 +57,9 @@ void sys_mmap_call(struct intr_frame* f);
 void sys_munmap_call(struct intr_frame* f);
 // End - Syscall declarations
 
-struct supplemental_pte* check_valid_ptr (const void *vaddr, void* esp);
-void check_valid_buffer (void* buffer, unsigned size, void* esp, bool to_write);
-void check_valid_string (const void* str, void* esp);
-void is_page_writable (struct supplemental_pte *spte);
+struct supplemental_pte* validate_pointer (const void *vaddr, void* esp);
+void validate_buffer (void* buffer, unsigned size, void* esp, bool to_write);
+void validate_file (char* file, void* esp);
 void unpin_ptr (void* vaddr);
 void unpin_string (void* str);
 void unpin_buffer (void* buffer, unsigned size);
@@ -77,8 +76,7 @@ void syscall_init(void) {
  */
 static void syscall_handler(struct intr_frame *f UNUSED) {
 
-	int arg[MAX_ARGS];
-	check_valid_ptr((const void*) f->esp, f->esp);
+	validate_pointer((const void*) f->esp, f->esp);
 
 	//get the system call number from esp
 	int system_call_number = *(int *) f->esp;
@@ -185,7 +183,8 @@ void sys_exec_call(struct intr_frame* f) {
 	retrieve_syscall_param(f, &arg[0], 1);
 	//const char *file = get_physical_file(arg[0]);
 	//TODO
-	check_valid_string((const void *) arg[0], f->esp);
+	//validate_string((const void *) arg[0], f->esp);
+	validate_file((char *) arg[0], f->esp);
 	f->eax = exec((const char *) arg[0]);
 	unpin_string((void *) arg[0]);
 	//************
@@ -204,7 +203,8 @@ void sys_create_call(struct intr_frame* f) {
 	int arg[2];
 	retrieve_syscall_param(f, &arg[0], 2);
 	//TODO
-	check_valid_string((const void *) arg[0], f->esp);
+	//validate_string((const void *) arg[0], f->esp);
+	validate_file((char *) arg[0], f->esp);
 	//*********
 	//const char *file = get_physical_file(arg[0]);
 	//unsigned initial_size = get_size(arg[1]);
@@ -220,7 +220,8 @@ void sys_remove_call(struct intr_frame* f) {
 	//const char *file = get_physical_file(arg[0]);
 	//f->eax = remove(file);
 	//TODO
-	check_valid_string((const void *) arg[0], f->esp);
+	//validate_string((const void *) arg[0], f->esp);
+	validate_file((char *) arg[0], f->esp);
 	f->eax = remove((const char *) arg[0]);
 	//**************
 }
@@ -232,7 +233,8 @@ void sys_open_call(struct intr_frame* f) {
 	/*const char *file = get_physical_file(arg[0]);
 	f->eax = open(file);*/
 	//TODO
-	check_valid_string((const void *) arg[0], f->esp);
+	//validate_string((const void *) arg[0], f->esp);
+	validate_file((char *) arg[0], f->esp);
 	f->eax = open((const char *) arg[0]);
 	unpin_string((void *) arg[0]);
 	//******************
@@ -261,7 +263,7 @@ void sys_read_call(struct intr_frame* f) {
 
 	f->eax = read(file_descriptor, physical_buffer, size);*/
 	//TODO
-	check_valid_buffer((void *) arg[1], (unsigned) arg[2], f->esp,
+	validate_buffer((void *) arg[1], (unsigned) arg[2], f->esp,
 			true);
 	f->eax = read(arg[0], (void *) arg[1], (unsigned) arg[2]);
 	unpin_buffer((void *) arg[1], (unsigned) arg[2]);
@@ -282,7 +284,7 @@ void sys_write_call(struct intr_frame* f) {
 
 	f->eax = write(file_descriptor, physical_buffer, size);*/
 	//TODO
-	check_valid_buffer((void *) arg[1], (unsigned) arg[2], f->esp,
+	validate_buffer((void *) arg[1], (unsigned) arg[2], f->esp,
 			false);
 	f->eax = write(arg[0], (const void *) arg[1],
 			(unsigned) arg[2]);
@@ -371,7 +373,7 @@ int mmap (int fd, void *addr)
 
 void munmap (int mapping)
 {
-	process_remove_mmap(mapping);
+	delete_mem_map_entry(mapping);
 }
 
 void halt (void)
@@ -622,43 +624,50 @@ void close(int fd) {
 	lock_release(&file_resource_lock);
 }
 
-struct supplemental_pte* check_valid_ptr(const void *vaddr, void* esp)
-{
+/**
+ * Checks if the given virtual address is a valid one and then
+ * TODO
+ * Returns the valid supplemental page table entry
+ */
+struct supplemental_pte* validate_pointer(const void *vaddr, void* esp) {
+
 	if (!is_virtual_addr_valid(vaddr)) {
 
 		exit(SYSCALL_ERROR);
 	}
+
 	bool load = false;
+
 	struct supplemental_pte *spte = get_supplemental_pte((void *) vaddr);
-	if (spte)
-	{
+	if (spte) {
+
 		supplemental_page_table_handler(spte);
 		load = spte->is_page_loaded;
-	}
-	else if (vaddr >= esp - STACK_HEURISTIC)
-	{
+	} else if (vaddr >= esp - STACK_HEURISTIC) {
+
 		load = increment_stack_size((void *) vaddr);
 	}
-	if (!load)
-	{
+
+	if (!load) {
+
 		exit(SYSCALL_ERROR);
 	}
+
 	return spte;
 }
 
-void check_valid_buffer (void* buffer, unsigned size, void* esp,
-		bool to_write)
-{
+void validate_buffer(void* buffer, unsigned size, void* esp, bool to_write) {
+
 	unsigned i;
 	char* local_buffer = (char *) buffer;
-	for (i = 0; i < size; i++)
-	{
-		struct supplemental_pte *spte = check_valid_ptr((const void*)
-				local_buffer, esp);
-		if (spte && to_write)
-		{
-			if (!spte->is_page_writable)
-			{
+
+	for (i = 0; i < size; i++) {
+
+		struct supplemental_pte *spte = validate_pointer((const void*) local_buffer, esp);
+		if (spte && to_write) {
+
+			if (!spte->is_page_writable) {
+
 				exit(SYSCALL_ERROR);
 			}
 		}
@@ -666,41 +675,44 @@ void check_valid_buffer (void* buffer, unsigned size, void* esp,
 	}
 }
 
-void check_valid_string (const void* str, void* esp)
-{
-	check_valid_ptr(str, esp);
-	while (* (char *) str != 0)
-	{
-		str = (char *) str + 1;
-		check_valid_ptr(str, esp);
-	}
+/**
+ * Checks if the
+ */
+void validate_file(char* file, void* esp) {
+
+	do {
+
+		validate_pointer(file, esp);
+		file = file + 1;
+	} while(*file != '\0');
 }
 
-void unpin_ptr (void* vaddr)
-{
+void unpin_ptr(void* vaddr) {
+
 	struct supplemental_pte *spte = get_supplemental_pte(vaddr);
-	if (spte)
-	{
+	if (spte) {
+
 		spte->is_page_pinned = false;
 	}
 }
 
-void unpin_string (void* str)
-{
+void unpin_string(void* str) {
+
 	unpin_ptr(str);
-	while (* (char *) str != 0)
-	{
+
+	while (*(char *) str != 0) {
+
 		str = (char *) str + 1;
 		unpin_ptr(str);
 	}
 }
 
-void unpin_buffer (void* buffer, unsigned size)
-{
+void unpin_buffer(void* buffer, unsigned size) {
+
 	unsigned i;
 	char* local_buffer = (char *) buffer;
-	for (i = 0; i < size; i++)
-	{
+	for (i = 0; i < size; i++) {
+
 		unpin_ptr(local_buffer);
 		local_buffer++;
 	}
@@ -747,9 +759,8 @@ int get_physicaladdr(const void *virtual_addr) {
 int add_file_to_currently_used_files(struct file *file_) {
 
 	struct file_details *f_details = malloc(sizeof(struct file_details));
+	if (!f_details) {
 
-	//TODO
-	if(!f_details){
 		return SYSCALL_ERROR;
 	}
 
@@ -767,13 +778,14 @@ int add_file_to_currently_used_files(struct file *file_) {
  * Retrieves the file from the threads file list based on file descriptor
  */
 struct file* get_file_from_currently_used_files(int file_descriptor) {
+
 	struct thread *t = thread_current();
 	struct list_elem *e = list_begin(&t->currently_used_files);
 
 	while (e != list_end(&t->currently_used_files)) {
+
 		struct file_details *file_details_ =
 				list_entry (e, struct file_details, elem);
-
 		if (file_descriptor == file_details_->file_descriptor) {
 
 			//found the file. just return
@@ -795,10 +807,12 @@ struct file* get_file_from_currently_used_files(int file_descriptor) {
  * frees up memory respectively.
  */
 void close_file(int file_descriptor) {
+
 	struct thread *current_thread = thread_current();
 	struct list_elem *next, *e;
 
 	if (file_descriptor != PROCESS_EXIT) {
+
 		struct file_details *file_details_ = find_file_details(current_thread,
 				file_descriptor);
 		if (file_details_ != NULL) {
@@ -806,16 +820,19 @@ void close_file(int file_descriptor) {
 			//helper to close file with descriptor fd.
 			close_single_file(file_details_);
 		}
+
 	} else {
+
 		for (e = list_begin(&current_thread->currently_used_files);
 				e != list_end(&current_thread->currently_used_files); e =
 						next) {
+
 			next = list_next(e);
 
 			struct file_details *file_details_ =
 					list_entry (e, struct file_details, elem);
-
 			if (file_details_ != NULL) {
+
 				close_single_file(file_details_);
 			}
 		}
@@ -825,13 +842,15 @@ void close_file(int file_descriptor) {
 /**
  * Closes a single file
  */
-void close_single_file(struct file_details* file_detials) {
+void close_single_file(struct file_details* file_details) {
 
-	if (file_detials != NULL) {
-		file_close(file_detials->file);
-		list_remove(&file_detials->elem);
+	if (file_details != NULL) {
 
-		free(file_detials);
+		file_close(file_details->file);
+
+		list_remove(&file_details->elem);
+
+		free(file_details);
 	}
 }
 
@@ -839,6 +858,7 @@ void close_single_file(struct file_details* file_detials) {
  * Finds the file details in the list of currently used files of thread using the file descriptor.
  */
 struct file_details* find_file_details(struct thread *t, int file_descriptor) {
+
 	struct list_elem *e;
 
 	for (e = list_begin(&t->currently_used_files);
@@ -848,29 +868,39 @@ struct file_details* find_file_details(struct thread *t, int file_descriptor) {
 				list_entry (e, struct file_details, elem);
 
 		if (file_descriptor == file_details_->file_descriptor) {
+
 			return file_details_;
 		}
 	}
 	return NULL;
 }
 
-// Returns the file pointer
+/**
+ * Returns the file pointer
+ */
 char* get_physical_file(int file_syscall_parameter) {
 
 	return (const char *) get_physicaladdr((const void *) file_syscall_parameter);
 }
 
-// returns the size as unsidned value.
+/**
+ * Returns the size as unsigned value.
+ */
 unsigned int get_size(int size_syscall_parameter) {
+
 	return (unsigned) size_syscall_parameter;
 }
 
-// Returns the file descriptor.
+/**
+ * Returns the file descriptor.
+ */
 int get_file_descriptor(int file_descriptor_syscall_parameter) {
 	return file_descriptor_syscall_parameter;
 }
 
-// Reads for standard input.
+/**
+ * Reads for standard input.
+ */
 int read_from_standard_input(void *buffer, unsigned size_to_be_read) {
 	unsigned i;
 	uint8_t* buffer_ = (uint8_t *) buffer;
@@ -880,11 +910,15 @@ int read_from_standard_input(void *buffer, unsigned size_to_be_read) {
 	return size_to_be_read;
 }
 
-// Reads from file
+/**
+ * Reads from file
+ */
 int read_from_file(int file_descriptor, void *buffer, unsigned size_to_be_read) {
+
 	lock_acquire(&file_resource_lock);
 	struct file *f = get_file_from_currently_used_files(file_descriptor);
 	if (f == NULL) {
+
 		lock_release(&file_resource_lock);
 		return SYSCALL_ERROR;
 	}
@@ -893,18 +927,24 @@ int read_from_file(int file_descriptor, void *buffer, unsigned size_to_be_read) 
 	return bytes;
 }
 
-// Write to standard output
+/**
+ * Write to standard output
+ */
 int write_to_standard_output(void *buffer, unsigned size_to_be_read) {
 	putbuf(buffer, size_to_be_read);
 	return size_to_be_read;
 }
 
-// Writes to file
+/**
+ * Writes to file
+ */
 int write_to_file(int file_descriptor, void *buffer, unsigned size_to_be_read) {
 
 	lock_acquire(&file_resource_lock);
 	struct file *f = get_file_from_currently_used_files(file_descriptor);
+
 	if ((f == NULL) || check_if_file_write_deny(f)) {
+
 		lock_release(&file_resource_lock);
 		return SYSCALL_ERROR;
 	}
@@ -914,17 +954,22 @@ int write_to_file(int file_descriptor, void *buffer, unsigned size_to_be_read) {
 	return bytes;
 }
 
-// Performs actions after file is opened
+/**
+ * Performs actions after file is opened
+ */
 int perform_actions_after_file_open(struct file *file_) {
 
 	if (file_ == NULL) {
+
 		return SYSCALL_ERROR;
 	}
 
 	return add_file_to_currently_used_files(file_);
 }
 
-// Retrieves the system call parameters
+/**
+ * Retrieves the system call parameters
+ */
 void retrieve_syscall_param(struct intr_frame *f, int *arg,
 		int number_of_parameters) {
 	int i;
@@ -935,8 +980,90 @@ void retrieve_syscall_param(struct intr_frame *f, int *arg,
 		ptr = f->esp + i * sizeof(char *);
 		//is_virtual_addr_valid((const void *) ptr);
 		//TODO
-		check_valid_ptr((const void *) ptr, f->esp);
+		validate_pointer((const void *) ptr, f->esp);
 		//***********
 		arg[index] = *ptr;
+	}
+}
+
+/**
+ * Creates a new mem map and then pushes it onto the mem map list of the current thread
+ */
+bool create_mem_map_entry(struct supplemental_pte *spte) {
+
+	struct mem_map_entry *mem_map_entry = malloc(sizeof(struct mem_map_entry));
+	if (!mem_map_entry) {
+
+		//failed to create a new mem map
+		return false;
+	}
+
+	mem_map_entry->map_id = thread_current()->mapid;
+	mem_map_entry->spte = spte;
+
+	list_push_back(&thread_current()->mem_map_list, &mem_map_entry->elem);
+
+	return true;
+}
+
+void delete_mem_map_entry(int map_id) {
+
+	struct thread *t = thread_current();
+	struct list_elem *next, *e = list_begin(&t->mem_map_list);
+	struct file *f = NULL;
+	int close = 0;
+
+	while (e != list_end(&t->mem_map_list)) {
+
+		next = list_next(e);
+
+		struct mem_map_entry *mm = list_entry (e, struct mem_map_entry, elem);
+		if (mm->map_id == map_id || map_id == PROCESS_EXIT) {
+
+			mm->spte->is_page_pinned = true;
+			if (mm->spte->is_page_loaded) {
+
+				if (pagedir_is_dirty(t->pagedir, mm->spte->user_virtual_address)) {
+
+					lock_acquire(&file_resource_lock);
+					file_write_at(mm->spte->required_file,
+							mm->spte->user_virtual_address,
+							mm->spte->read_bytes, mm->spte->offset);
+					lock_release(&file_resource_lock);
+				}
+				free_frame_table_entry(mm->spte->frame_table_entry_,
+						pagedir_get_page(t->pagedir,
+								mm->spte->user_virtual_address));
+				pagedir_clear_page(t->pagedir, mm->spte->user_virtual_address);
+			}
+
+			if (mm->spte->table_entry_type != TABLE_ENTRY_ERR) {
+
+				hash_delete(&t->spt, &mm->spte->sup_pte_elem);
+			}
+			list_remove(&mm->elem);
+
+			if (mm->map_id != close) {
+
+				if (f) {
+
+					lock_acquire(&file_resource_lock);
+					file_close(f);
+					lock_release(&file_resource_lock);
+				}
+				close = mm->map_id;
+				f = mm->spte->required_file;
+			}
+			free(mm->spte);
+			free(mm);
+		}
+		e = next;
+	}
+
+	if (f) {
+
+		lock_acquire(&file_resource_lock);
+		file_close(f);
+		lock_release(&file_resource_lock);
 	}
 }
