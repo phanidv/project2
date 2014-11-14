@@ -14,12 +14,16 @@
 #include "vm/swap.h"
 
 bool read_file_into_memory(struct supplemental_pte *sup_pte, uint8_t *frame);
+void populate_sup_pte(struct supplemental_pte *sup_pte, bool is_page_pinned,
+		bool is_page_loaded, struct file *required_file, size_t ofs,
+		size_t read_bytes, size_t zero_bytes);
+void cleanup_loaded_page(struct supplemental_pte *supp_pte);
 
 /**
  * Initializes the supplementary page table.
  */
 void init_sup_page_table(struct hash *spt) {
-	hash_init(spt, get_sup_page_hash, sup_page_less_func, NULL);
+	hash_init(spt, get_hashcode, hash_comparator, NULL);
 }
 
 /**
@@ -40,15 +44,22 @@ void sup_page_destroyer(struct hash_elem *e, void *aux UNUSED) {
 	 * Is page is currently loaded. Free the frame first.
 	 */
 	if (supp_pte->is_page_loaded) {
-
-		free_frame_table_entry(supp_pte->frame_table_entry_, pagedir_get_page(thread_current()->pagedir,supp_pte->user_virtual_address));
-
-		pagedir_clear_page(thread_current()->pagedir, supp_pte->user_virtual_address);
+		cleanup_loaded_page(supp_pte);
 	}
 	/**
 	 * Free entry.
 	 */
 	free(supp_pte);
+}
+
+/**
+ * Destroys the frame table entry, associated frame and clears the page for a loaded page.
+ */
+void cleanup_loaded_page(struct supplemental_pte *supp_pte)
+{
+	free_frame_table_entry(supp_pte->frame_table_entry_, pagedir_get_page(thread_current()->pagedir,supp_pte->user_virtual_address));
+
+	pagedir_clear_page(thread_current()->pagedir, supp_pte->user_virtual_address);
 }
 
 /**
@@ -121,7 +132,7 @@ bool set_file_in_frame(struct supplemental_pte *sup_pte) {
 	 */
 	if (sup_pte->read_bytes == 0)
 	{
-		flags = PAL_USER + PAL_ZERO;
+		flags = PAL_USER_ZERO;
 	}
 
 	uint8_t *frame = get_frame(flags, sup_pte);
@@ -248,24 +259,9 @@ struct supplemental_pte* create_supplemental_pte(struct file *file, int32_t ofs,
 		sup_pte_type type, bool writable) {
 
 	struct supplemental_pte *sup_pte = malloc(sizeof(struct supplemental_pte));
-
 	if (sup_pte == NULL) {
 
 		return NULL;
-	}
-
-	if (type != SWAPPED_PAGE) {
-
-		sup_pte->required_file = file;
-		sup_pte->offset = ofs;
-		sup_pte->read_bytes = read_bytes;
-		sup_pte->zero_bytes = zero_bytes;
-		sup_pte->is_page_pinned = false;
-		sup_pte->is_page_loaded = false;
-	} else {
-
-		sup_pte->is_page_loaded = true;
-		sup_pte->is_page_pinned = true;
 	}
 
 	sup_pte->user_virtual_address = upage;
@@ -273,7 +269,30 @@ struct supplemental_pte* create_supplemental_pte(struct file *file, int32_t ofs,
 	sup_pte->is_page_writable = writable;
 	sup_pte->frame_table_entry_ = NULL;
 
+	if (type == SWAPPED_PAGE) {
+
+		populate_sup_pte(sup_pte, true, true, NULL, 0, 0, 0);
+	} else {
+
+		populate_sup_pte(sup_pte, false, false, file, ofs, read_bytes, zero_bytes);
+	}
+
 	return sup_pte;
+}
+
+/**
+ * Populates the supplemental page table entries
+ */
+void populate_sup_pte(struct supplemental_pte *sup_pte, bool is_page_pinned,
+		bool is_page_loaded, struct file *required_file, size_t ofs,
+		size_t read_bytes, size_t zero_bytes) {
+
+	sup_pte->is_page_pinned = is_page_pinned;
+	sup_pte->is_page_loaded = is_page_loaded;
+	sup_pte->required_file = required_file;
+	sup_pte->offset = ofs;
+	sup_pte->read_bytes = read_bytes;
+	sup_pte->zero_bytes = zero_bytes;
 }
 
 /**
@@ -331,7 +350,7 @@ bool is_stack_max(void *user_virtual_address) {
 /**
  * The hash code generator for supplementary page table.
  */
-unsigned get_sup_page_hash(const struct hash_elem *e, void *aux UNUSED) {
+unsigned get_hashcode(const struct hash_elem *e, void *aux UNUSED) {
 
 	struct supplemental_pte *sup_pte = hash_entry(e, struct supplemental_pte,
 			sup_pte_elem);
@@ -339,9 +358,9 @@ unsigned get_sup_page_hash(const struct hash_elem *e, void *aux UNUSED) {
 }
 
 /**
- * Compares the virtual addresses
+ * Compares the hash structs
  */
-bool sup_page_less_func(const struct hash_elem *a, const struct hash_elem *b,
+bool hash_comparator(const struct hash_elem *a, const struct hash_elem *b,
 		void *aux UNUSED) {
 
 	struct supplemental_pte *sup_pte_a = hash_entry(a, struct supplemental_pte, sup_pte_elem);

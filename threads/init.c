@@ -397,9 +397,9 @@ locate_block_devices (void)
 #ifdef VM
   locate_block_device (BLOCK_SWAP, swap_bdev_name);
 
-  //TODO
+  //initializing the swap space
   initialize_swap_space();
-  //**************
+
 #endif
 }
 

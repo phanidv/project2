@@ -74,7 +74,7 @@ start_process (void *file_name_)
 	char *save_ptr;
 	file_name = strtok_r(file_name, " ", &save_ptr);*/
 
-	// Initialize page table
+	// Initializing supplementary page table for this process.
 	init_sup_page_table(&thread_current()->supplementary_pt);
 
 	/* Initialize interrupt frame and load executable. */
@@ -82,7 +82,6 @@ start_process (void *file_name_)
 	if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
 	if_.cs = SEL_UCSEG;
 	if_.eflags = FLAG_IF | FLAG_MBS;
-	//success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
 	success = load (file_name, &if_.eip, &if_.esp);
 	struct spawned_child_thread *my_pos =
 			thread_current()->my_position_in_parent_children;
@@ -167,14 +166,15 @@ void process_exit(void) {
 	delete_child_all_or_one(true, NULL);
 
 	//checking if the parent is alive
-	//TODO
 	if (is_present_in_kernel(cur->parent_tid)){ //&& cur->my_position_in_parent_children) {
 
 		//if alive, set the flag that the current process has exited
 		cur->my_position_in_parent_children->has_exited = true;
 	}
 
+	//deletes all the memory mapped entries for the current process
 	delete_mem_map_entry_all_or_one(true, NULL);
+	//deletes the supplementary page table entry
 	destroy_sup_page_table(&cur->supplementary_pt);
 
 	/* Destroy the current process's page directory and switch back

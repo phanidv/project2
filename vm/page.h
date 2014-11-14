@@ -104,8 +104,8 @@ bool push_mapped_file_in_supplemental_page_table(struct file *file, int32_t ofs,
 /**
  * helper methods
  */
-unsigned get_sup_page_hash(const struct hash_elem *e, void *aux UNUSED);
-bool sup_page_less_func(const struct hash_elem *a,
+unsigned get_hashcode(const struct hash_elem *e, void *aux UNUSED);
+bool hash_comparator(const struct hash_elem *a,
 		const struct hash_elem *b, void *aux UNUSED);
 void sup_page_destroyer(struct hash_elem *e, void *aux UNUSED);
 bool is_stack_max(void *user_virtual_address);
