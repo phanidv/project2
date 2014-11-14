@@ -7,7 +7,7 @@
 /**
  * This determines the max stack size. Currently set to 8MB.
  */
-#define MAX_STACK_SIZE (1 << 23)
+#define STACK_MAX_LIMIT (1 << 23)
 
 /**
  * This enum determines the type of entry in supplemental page table.
@@ -16,7 +16,7 @@
  * back on the stack, i.e disk or swap-space.
  */
 typedef enum {
-	DISK_PAGE, SWAPED_PAGE, MEM_MAPPAED_PAGE, TABLE_ENTRY_ERR
+	DISK_PAGE, SWAPPED_PAGE, MEM_MAPPED_PAGE, TABLE_ENTRY_ERR
 } sup_pte_type;
 
 /**

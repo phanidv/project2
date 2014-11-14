@@ -82,53 +82,50 @@ typedef int tid_t;
    only because they are mutually exclusive: only a thread in the
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
-struct thread
-  {
-    /* Owned by thread.c. */
-    tid_t tid;                          /* Thread identifier. */
-    enum thread_status status;          /* Thread state. */
-    char name[16];                      /* Name (for debugging purposes). */
-    uint8_t *stack;                     /* Saved stack pointer. */
-    int priority;                       /* Priority. */
-    struct list_elem allelem;           /* List element for all threads list. */
+struct thread {
+	/* Owned by thread.c. */
+	tid_t tid; /* Thread identifier. */
+	enum thread_status status; /* Thread state. */
+	char name[16]; /* Name (for debugging purposes). */
+	uint8_t *stack; /* Saved stack pointer. */
+	int priority; /* Priority. */
+	struct list_elem allelem; /* List element for all threads list. */
 
-    /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
+	/* Shared between thread.c and synch.c. */
+	struct list_elem elem; /* List element. */
 
 #ifdef USERPROG
-    /* Owned by userprog/process.c. */
-    uint32_t *pagedir;                  /* Page directory. */
+	/* Owned by userprog/process.c. */
+	uint32_t *pagedir; /* Page directory. */
 #endif
 
-    /* Owned by thread.c. */
-    unsigned magic;                     /* Detects stack overflow. */
+	/* Owned by thread.c. */
+	unsigned magic; /* Detects stack overflow. */
 
-    // This pointer holds the address of position of this thread in parent's children list.
-    struct spawned_child_thread* my_position_in_parent_children;
+	// This pointer holds the address of position of this thread in parent's children list.
+	struct spawned_child_thread* my_position_in_parent_children;
 
-    // Maintains a list of spawned children
-    struct list children;
+	// Maintains a list of spawned children
+	struct list children;
 
-    // UID for each parent
-    tid_t parent_tid;
+	// UID for each parent
+	tid_t parent_tid;
 
-    // The descriptor of file
-    int current_fd_to_be_assigned;
+	// The descriptor of file
+	int current_fd_to_be_assigned;
 
-    // List files used by the thread
-    struct list currently_used_files;
+	// List files used by the thread
+	struct list currently_used_files;
 
-    // Needed to keep track of locks thread holds
-    struct list lock_list;
+	// Unique map id to be assigned to the memory mapped entries
+	int map_id_to_be_assigned;
 
-    // Needed for denying writes to executables
-    struct file* executable;
+	// Structure to hold the memory mapped file entries
+	struct list mem_map_list;
 
-    struct hash spt;
-
-    struct list mem_map_list;
-    int mapid;
-  };
+	// Structure to hold the supplementary page table entries
+	struct hash supplementary_pt;
+};
 
 // Status codes of file descriptor
 typedef enum {

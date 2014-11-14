@@ -3,7 +3,7 @@
 
 #include "threads/synch.h"
 
-#define STACK_HEURISTIC 32
+#define STACK_HEURISTIC 32 // 4 bytes
 
 /*
  * Lock that should be acquired to perform any file operations.

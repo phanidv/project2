@@ -25,6 +25,7 @@
 #define THREAD_MAGIC 0xcd6abf4b
 
 #define INITIAL_FILE_DESCRIPTOR 2
+#define INTIAL_MMAP_ID 0
 #define NO_PARENT -1
 
 /* List of processes in THREAD_READY state, that is, processes
@@ -327,9 +328,7 @@ void thread_exit(void) {
 	 and schedule another process.  That process will destroy us
 	 when it calls thread_schedule_tail(). */
 	intr_disable();
-	// TODO
-	release_locks();
-	//*********
+
 	list_remove(&thread_current()->allelem);
 	thread_current()->status = THREAD_DYING;
 	schedule();
@@ -491,17 +490,11 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 	t->magic = THREAD_MAGIC;
 	list_push_back(&all_list, &t->allelem);
 
-	//TODO
-	t->executable = NULL;
-
-	list_init(&t->lock_list);
-	//*************
-
 	list_init(&t->currently_used_files);
 	t->current_fd_to_be_assigned = INITIAL_FILE_DESCRIPTOR;
 
 	list_init(&t->mem_map_list);
-	t->mapid = 0;
+	t->map_id_to_be_assigned = INTIAL_MMAP_ID;
 
 	list_init(&t->children);
 	t->my_position_in_parent_children = NULL;
@@ -664,19 +657,6 @@ void delete_children(void) {
 		list_remove(&cp->elem);
 
 		free(cp);
-		e = next;
-	}
-}
-
-void release_locks(void) {
-	struct thread *t = thread_current();
-	struct list_elem *next, *e = list_begin(&t->lock_list);
-
-	while (e != list_end(&t->lock_list)) {
-		next = list_next(e);
-		struct lock *l = list_entry (e, struct lock, elem);
-		lock_release(l);
-		list_remove(&l->elem);
 		e = next;
 	}
 }

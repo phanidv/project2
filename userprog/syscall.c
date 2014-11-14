@@ -21,12 +21,10 @@ static void syscall_handler (struct intr_frame *);
 int add_file_to_currently_used_files(struct file *file_);
 struct file* get_file_from_currently_used_files(int file_descriptor);
 
-int get_physicaladdr(const void *virtual_addr);
 void retrieve_syscall_param(struct intr_frame *f, int *arg,
 		int number_of_parameters);
 bool is_virtual_addr_valid(const void *virtual_addr);
 
-char* get_physical_file(int file_syscall_parameter);
 unsigned int get_size(int size_syscall_parameter);
 int get_file_descriptor(int file_descriptor_syscall_parameter);
 int read_from_standard_input(void *buffer, unsigned size_to_be_read);
@@ -37,7 +35,13 @@ int perform_actions_after_file_open(struct file *file_);
 void close_single_file(struct file_details* file_details);
 struct file_details* find_file_details(struct thread *t, int file_descriptor);
 bool create_mem_map_entry (struct supplemental_pte *spte);
-void delete_mem_map_entry (int map_id);
+void delete_mem_map_entry_all_or_one(bool all, int map_id);
+struct mem_map_entry* retrieve_mem_map_entry(int map_id);
+void delete_mem_map_entry(struct mem_map_entry *mme);
+void perform_actions_before_delete(struct mem_map_entry *mme);
+void write_out_file(struct mem_map_entry *mme);
+bool load_mem_map_segment(struct file *file, off_t ofs, uint32_t read_bytes, void *addr);
+bool load_file_from_spte(struct supplemental_pte *spte, const void *vaddr, void* esp);
 
 // Start - Syscall declarations
 void sys_halt_call(void);
@@ -58,11 +62,9 @@ void sys_munmap_call(struct intr_frame* f);
 // End - Syscall declarations
 
 struct supplemental_pte* validate_pointer (const void *vaddr, void* esp);
-void validate_buffer (void* buffer, unsigned size, void* esp, bool to_write);
+void validate_buffer (char* buffer, unsigned length, void* esp, bool to_write);
 void validate_file (char* file, void* esp);
-void unpin_ptr (void* vaddr);
-void unpin_string (void* str);
-void unpin_buffer (void* buffer, unsigned size);
+bool initialize_mem_map_entry(struct mem_map_entry *mem_map_entry, struct supplemental_pte *spte);
 
 void syscall_init(void) {
 
@@ -157,7 +159,7 @@ static void syscall_handler(struct intr_frame *f UNUSED) {
 		break;
 	}
 	}
-	unpin_ptr(f->esp);
+	remove_ptr_pin(f->esp);
 }
 
 /*
@@ -181,19 +183,17 @@ void sys_exec_call(struct intr_frame* f) {
 
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
-	//const char *file = get_physical_file(arg[0]);
-	//TODO
-	//validate_string((const void *) arg[0], f->esp);
+
 	validate_file((char *) arg[0], f->esp);
 	f->eax = exec((const char *) arg[0]);
-	unpin_string((void *) arg[0]);
-	//************
+	remove_string_pin((char *) arg[0]);
 }
 
 void sys_wait_call(struct intr_frame* f) {
 
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
+
 	int pid = arg[0];
 	f->eax = wait(pid);
 }
@@ -202,48 +202,41 @@ void sys_create_call(struct intr_frame* f) {
 
 	int arg[2];
 	retrieve_syscall_param(f, &arg[0], 2);
-	//TODO
-	//validate_string((const void *) arg[0], f->esp);
+
 	validate_file((char *) arg[0], f->esp);
-	//*********
-	//const char *file = get_physical_file(arg[0]);
-	//unsigned initial_size = get_size(arg[1]);
-	//f->eax = create(file, initial_size);
+
 	f->eax = create((const char *)arg[0], (unsigned) arg[1]);
-	unpin_string((void *) arg[0]);
+
+	remove_string_pin((char *) arg[0]);
 }
 
 void sys_remove_call(struct intr_frame* f) {
 
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
-	//const char *file = get_physical_file(arg[0]);
-	//f->eax = remove(file);
-	//TODO
-	//validate_string((const void *) arg[0], f->esp);
+
 	validate_file((char *) arg[0], f->esp);
+
 	f->eax = remove((const char *) arg[0]);
-	//**************
 }
 
 void sys_open_call(struct intr_frame* f) {
 
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
-	/*const char *file = get_physical_file(arg[0]);
-	f->eax = open(file);*/
-	//TODO
-	//validate_string((const void *) arg[0], f->esp);
+
 	validate_file((char *) arg[0], f->esp);
+
 	f->eax = open((const char *) arg[0]);
-	unpin_string((void *) arg[0]);
-	//******************
+
+	remove_string_pin((char *) arg[0]);
 }
 
 void sys_filesize_call(struct intr_frame* f) {
 
 	int arg[1];
 	retrieve_syscall_param(f, &arg[0], 1);
+
 	int file_descriptor = get_file_descriptor(arg[0]);
 
 	f->eax = filesize(file_descriptor);
@@ -254,20 +247,11 @@ void sys_read_call(struct intr_frame* f) {
 	int arg[3];
 	retrieve_syscall_param(f, &arg[0], 3);
 
-	/*void *virtual_buffer = (void *) arg[1];
-	unsigned size = get_size(arg[2]);
-	is_virtual_addr_valid((const void*) virtual_buffer);
+	validate_buffer((char *) arg[1], (unsigned) arg[2], f->esp, true);
 
-	void *physical_buffer = get_physicaladdr(virtual_buffer);
-	int file_descriptor = get_file_descriptor(arg[0]);
-
-	f->eax = read(file_descriptor, physical_buffer, size);*/
-	//TODO
-	validate_buffer((void *) arg[1], (unsigned) arg[2], f->esp,
-			true);
 	f->eax = read(arg[0], (void *) arg[1], (unsigned) arg[2]);
-	unpin_buffer((void *) arg[1], (unsigned) arg[2]);
-	//**************
+
+	remove_buffer_pin((char *) arg[1], (unsigned) arg[2]);
 }
 
 void sys_write_call(struct intr_frame* f) {
@@ -275,21 +259,11 @@ void sys_write_call(struct intr_frame* f) {
 	int arg[3];
 	retrieve_syscall_param(f, &arg[0], 3);
 
-	/*void *virtual_buffer = (void *) arg[1];
-	unsigned size = get_size(arg[2]);
-	is_virtual_addr_valid((const void*) virtual_buffer);
+	validate_buffer((void *) arg[1], (unsigned) arg[2], f->esp, false);
 
-	void *physical_buffer = get_physicaladdr(virtual_buffer);
-	int file_descriptor = get_file_descriptor(arg[0]);
+	f->eax = write(arg[0], (const void *) arg[1], (unsigned) arg[2]);
 
-	f->eax = write(file_descriptor, physical_buffer, size);*/
-	//TODO
-	validate_buffer((void *) arg[1], (unsigned) arg[2], f->esp,
-			false);
-	f->eax = write(arg[0], (const void *) arg[1],
-			(unsigned) arg[2]);
-	unpin_buffer((void *) arg[1], (unsigned) arg[2]);
-	//******************
+	remove_buffer_pin((void *) arg[1], (unsigned) arg[2]);
 }
 
 void sys_seek_call(struct intr_frame* f) {
@@ -298,8 +272,8 @@ void sys_seek_call(struct intr_frame* f) {
 	retrieve_syscall_param(f, &arg[0], 2);
 
 	int file_descriptor = get_file_descriptor(arg[0]);
-	unsigned position = (unsigned) arg[1];
 
+	unsigned position = (unsigned) arg[1];
 	seek(file_descriptor, position);
 }
 
@@ -339,45 +313,8 @@ void sys_munmap_call(struct intr_frame* f) {
 	munmap(arg[0]);
 }
 
-int mmap (int fd, void *addr)
-{
-	struct file *old_file = get_file_from_currently_used_files(fd);
-	if (!old_file || !is_virtual_addr_valid(addr) || ((uint32_t) addr % PGSIZE) != 0)
-	{
-		return SYSCALL_ERROR;
-	}
-	struct file *file = file_reopen(old_file);
-	if (!file || file_length(old_file) == 0)
-	{
-		return SYSCALL_ERROR;
-	}
-	thread_current()->mapid++;
-	int32_t ofs = 0;
-	uint32_t read_bytes = file_length(file);
-	while (read_bytes > 0)
-	{
-		uint32_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-		uint32_t page_zero_bytes = PGSIZE - page_read_bytes;
-		if (!push_mapped_file_in_supplemental_page_table(file, ofs,
-				addr, page_read_bytes, page_zero_bytes))
-		{
-			munmap(thread_current()->mapid);
-			return SYSCALL_ERROR;
-		}
-		read_bytes -= page_read_bytes;
-		ofs += page_read_bytes;
-		addr += PGSIZE;
-	}
-	return thread_current()->mapid;
-}
+void halt(void) {
 
-void munmap (int mapping)
-{
-	delete_mem_map_entry(mapping);
-}
-
-void halt (void)
-{
 	shutdown_power_off();
 }
 
@@ -389,12 +326,12 @@ void halt (void)
 void exit(int status) {
 
 	struct thread *current_thread = thread_current();
-	//TODO
 	if (is_present_in_kernel(current_thread->parent_tid)) {
 
 		struct spawned_child_thread *my_pos =
 				current_thread->my_position_in_parent_children;
 		my_pos->status_value = status;
+
 		if (my_pos->is_waiting) {
 
 			lock_acquire(&my_pos->wait_lock);
@@ -413,7 +350,6 @@ void exit(int status) {
  *Must return pid -1, which otherwise should not be a valid pid, if the program cannot load or run for any reason.
  *Thus, the parent process cannot return from the exec until it knows whether the child process successfully loaded its executable.
  *
- *TODO: Must use appropriate synchronization to ensure this.
  */
 pid_t exec(const char *cmd_line) {
 
@@ -625,97 +561,197 @@ void close(int fd) {
 }
 
 /**
- * Checks if the given virtual address is a valid one and then
- * TODO
- * Returns the valid supplemental page table entry
+ * Memory maps the file represented by file descriptor.
  */
-struct supplemental_pte* validate_pointer(const void *vaddr, void* esp) {
+int mmap (int fd, void *addr)
+{
+	struct file *old_file = get_file_from_currently_used_files(fd);
 
-	if (!is_virtual_addr_valid(vaddr)) {
-
-		exit(SYSCALL_ERROR);
+	if ((old_file == NULL) || !is_virtual_addr_valid(addr) || ((uint32_t) addr % PGSIZE) != 0)
+	{
+		return SYSCALL_ERROR;
 	}
 
-	bool load = false;
+	struct file *file = file_reopen(old_file);
 
-	struct supplemental_pte *spte = get_supplemental_pte((void *) vaddr);
-	if (spte) {
+	thread_current()->map_id_to_be_assigned++;
 
-		load_file_from_swap_or_disk(spte);
-		load = spte->is_page_loaded;
-	} else if (vaddr >= esp - STACK_HEURISTIC) {
+	//Checking if the map file is empty or unsuccessfully loaded
+	if ((file == NULL) || file_length(old_file) == 0
+			|| !load_mem_map_segment(file, 0, file_length(file), addr)) {
 
-		load = increment_stack_size((void *) vaddr);
+		return SYSCALL_ERROR;
 	}
 
-	if (!load) {
-
-		exit(SYSCALL_ERROR);
-	}
-
-	return spte;
+	return thread_current()->map_id_to_be_assigned;
 }
 
-void validate_buffer(void* buffer, unsigned size, void* esp, bool to_write) {
+void munmap(int map_id) {
 
-	unsigned i;
-	char* local_buffer = (char *) buffer;
+	delete_mem_map_entry_all_or_one(false, map_id);
+}
 
-	for (i = 0; i < size; i++) {
+/**
+ * Loads the memory mapped file into the memory
+ */
+bool load_mem_map_segment(struct file *file, off_t ofs, uint32_t read_bytes, void *addr) {
 
-		struct supplemental_pte *spte = validate_pointer((const void*) local_buffer, esp);
-		if (spte && to_write) {
+	ASSERT(ofs % PGSIZE == 0);
 
-			if (!spte->is_page_writable) {
+	file_seek(file, ofs);
 
-				exit(SYSCALL_ERROR);
-			}
+	while (read_bytes > 0) {
+
+		/* Calculate how to fill this page.
+		 We will read PAGE_READ_BYTES bytes from FILE
+		 and zero the final PAGE_ZERO_BYTES bytes. */
+		uint32_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+		uint32_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+		//Loading the map file into the memory
+		if (!push_mapped_file_in_supplemental_page_table(file, ofs, addr,
+				page_read_bytes, page_zero_bytes)) {
+
+			munmap(thread_current()->map_id_to_be_assigned);
+			return false;
 		}
-		local_buffer++;
+
+		/* Advance. */
+		ofs += page_read_bytes;
+		read_bytes -= page_read_bytes;
+		addr += PGSIZE;
+	}
+	return true;
+}
+
+/**
+ * Creates a new mem map and then pushes it onto the mem map list of the current thread
+ */
+bool create_mem_map_entry(struct supplemental_pte *spte) {
+
+	struct mem_map_entry *mem_map_entry = malloc(sizeof(struct mem_map_entry));
+
+	if (mem_map_entry != NULL) {
+		return initialize_mem_map_entry(mem_map_entry, spte);
+	}
+
+	return false;
+}
+
+/**
+ * Initializes mem_map_entry.
+ */
+bool initialize_mem_map_entry(struct mem_map_entry *mem_map_entry, struct supplemental_pte *spte)
+{
+	mem_map_entry->map_id = thread_current()->map_id_to_be_assigned;
+	mem_map_entry->spte = spte;
+
+	list_push_back(&thread_current()->mem_map_list, &mem_map_entry->elem);
+
+	return true;
+}
+
+/**
+ * Deletes all the memory map entries or a single mem_map entry pertaining
+ * to the map_id based on the given boolean variable all
+ */
+void delete_mem_map_entry_all_or_one(bool all, int map_id) {
+
+	if (all) {
+
+		struct thread *t = thread_current();
+		struct list_elem *e = list_begin(&t->mem_map_list), *next;
+		while (e != list_end(&t->mem_map_list)) {
+
+			next = list_next(e);
+
+			delete_mem_map_entry(list_entry (e, struct mem_map_entry, elem));
+
+			e = next;
+		}
+	} else {
+
+		delete_mem_map_entry(retrieve_mem_map_entry(map_id));
 	}
 }
 
 /**
- * Checks if the
+ * Retrieves the memory map entry pertaining to the given map_id
  */
-void validate_file(char* file, void* esp) {
+struct mem_map_entry* retrieve_mem_map_entry(int map_id) {
 
-	do {
+	struct thread *t = thread_current();
+	struct list_elem *e = list_begin(&t->mem_map_list);
+	struct mem_map_entry *mme = NULL;
 
-		validate_pointer(file, esp);
-		file = file + 1;
-	} while(*file != '\0');
+	while (e != list_end(&t->mem_map_list)) {
+
+		mme = list_entry (e, struct mem_map_entry, elem);
+		if (mme->map_id == map_id) {
+
+			return mme;
+		}
+		e = list_next(e);
+	}
+	return NULL;
 }
 
-void unpin_ptr(void* vaddr) {
+/**
+ * Deletes and frees up the mem_map_entry
+ */
+void delete_mem_map_entry(struct mem_map_entry *mme) {
 
-	struct supplemental_pte *spte = get_supplemental_pte(vaddr);
-	if (spte) {
+	struct thread *t = thread_current();
 
-		spte->is_page_pinned = false;
+	mme->spte->is_page_pinned = true;
+
+	// If the file is loaded
+	if (mme->spte->is_page_loaded) {
+		perform_actions_before_delete(mme);
 	}
+
+	if (mme->spte->table_entry_type != TABLE_ENTRY_ERR) {
+
+		hash_delete(&t->supplementary_pt, &mme->spte->sup_pte_elem);
+	}
+
+	list_remove(&mme->elem);
+
+	// Free supplementary page table.
+	free(mme->spte);
+	free(mme);
 }
 
-void unpin_string(void* str) {
+/**
+ * Performs the following actions before delete:
+ * 1. If page is dirty, write out to disk.
+ * 2. Free the frame table entry and frame.
+ * 3. Clear the page.
+ */
+void perform_actions_before_delete(struct mem_map_entry *mme)
+{
+	struct thread *t = thread_current();
 
-	unpin_ptr(str);
+	if (pagedir_is_dirty(t->pagedir, mme->spte->user_virtual_address)) {
 
-	while (*(char *) str != 0) {
-
-		str = (char *) str + 1;
-		unpin_ptr(str);
+		write_out_file(mme);
 	}
+
+	free_frame_table_entry(mme->spte->frame_table_entry_,
+			pagedir_get_page(t->pagedir, mme->spte->user_virtual_address));
+	pagedir_clear_page(t->pagedir, mme->spte->user_virtual_address);
 }
 
-void unpin_buffer(void* buffer, unsigned size) {
-
-	unsigned i;
-	char* local_buffer = (char *) buffer;
-	for (i = 0; i < size; i++) {
-
-		unpin_ptr(local_buffer);
-		local_buffer++;
-	}
+/**
+ * Writes out the file to disk.
+ */
+void write_out_file(struct mem_map_entry *mme)
+{
+	lock_acquire(&file_resource_lock);
+	file_write_at(mme->spte->required_file,
+			mme->spte->user_virtual_address, mme->spte->read_bytes,
+			mme->spte->offset);
+	lock_release(&file_resource_lock);
 }
 
 /**
@@ -728,29 +764,6 @@ void unpin_buffer(void* buffer, unsigned size) {
 bool is_virtual_addr_valid(const void *virtual_addr) {
 
 	return (virtual_addr > ((void *) 0x08048000) && is_user_vaddr(virtual_addr));
-}
-
-/**
- * Returns the physical address corresponding to the give virtual address.
- * If physical addressed is unmapped, this function will call exit().
- *
- */
-int get_physicaladdr(const void *virtual_addr) {
-
-	if (!is_virtual_addr_valid(virtual_addr)) {
-
-		exit(SYSCALL_ERROR);
-	}
-
-	void *physical_addr = pagedir_get_page(thread_current()->pagedir,
-			virtual_addr);
-
-	if (physical_addr == NULL) {
-
-		exit(SYSCALL_ERROR);
-	}
-
-	return (int) physical_addr;
 }
 
 /**
@@ -876,14 +889,6 @@ struct file_details* find_file_details(struct thread *t, int file_descriptor) {
 }
 
 /**
- * Returns the file pointer
- */
-char* get_physical_file(int file_syscall_parameter) {
-
-	return (const char *) get_physicaladdr((const void *) file_syscall_parameter);
-}
-
-/**
  * Returns the size as unsigned value.
  */
 unsigned int get_size(int size_syscall_parameter) {
@@ -977,93 +982,116 @@ void retrieve_syscall_param(struct intr_frame *f, int *arg,
 
 	int index = 0;
 	for (i = 1; i <= number_of_parameters; i++, index++) {
+
 		ptr = f->esp + i * sizeof(char *);
-		//is_virtual_addr_valid((const void *) ptr);
-		//TODO
+
 		validate_pointer((const void *) ptr, f->esp);
-		//***********
+
 		arg[index] = *ptr;
 	}
 }
 
 /**
- * Creates a new mem map and then pushes it onto the mem map list of the current thread
+ * Checks if the given virtual address is a valid one.
+ * Loads a file for supplementary page table entry.
+ * Returns the corresponding supplemental page table entry
  */
-bool create_mem_map_entry(struct supplemental_pte *spte) {
+struct supplemental_pte* validate_pointer(const void *vaddr, void* esp) {
 
-	struct mem_map_entry *mem_map_entry = malloc(sizeof(struct mem_map_entry));
-	if (!mem_map_entry) {
+	if (!is_virtual_addr_valid(vaddr)) {
 
-		//failed to create a new mem map
-		return false;
+		exit(SYSCALL_ERROR);
 	}
 
-	mem_map_entry->map_id = thread_current()->mapid;
-	mem_map_entry->spte = spte;
+	struct supplemental_pte *spte = get_supplemental_pte((void *) vaddr);
 
-	list_push_back(&thread_current()->mem_map_list, &mem_map_entry->elem);
+	if (!load_file_from_spte(spte, vaddr, esp)) {
 
-	return true;
+		exit(SYSCALL_ERROR);
+	}
+	return spte;
 }
 
-void delete_mem_map_entry(int map_id) {
+/**
+ * Loads a file for supplementary page table entry.
+ */
+bool load_file_from_spte(struct supplemental_pte *spte, const void *vaddr, void* esp) {
 
-	struct thread *t = thread_current();
-	struct list_elem *next, *e = list_begin(&t->mem_map_list);
-	struct file *f = NULL;
-	int close = 0;
+	bool is_loaded = false;
 
-	while (e != list_end(&t->mem_map_list)) {
+	if (spte != NULL) {
 
-		next = list_next(e);
+		load_file_from_swap_or_disk(spte);
+		is_loaded = spte->is_page_loaded;
+	} else if (vaddr >= esp - STACK_HEURISTIC) {
 
-		struct mem_map_entry *mm = list_entry (e, struct mem_map_entry, elem);
-		if (mm->map_id == map_id || map_id == PROCESS_EXIT) {
+		is_loaded = increment_stack_size((void *) vaddr);
+	}
 
-			mm->spte->is_page_pinned = true;
-			if (mm->spte->is_page_loaded) {
+	return is_loaded;
+}
 
-				if (pagedir_is_dirty(t->pagedir, mm->spte->user_virtual_address)) {
+/**
+ * Validates the buffer and loads it.
+ */
+void validate_buffer(char* buffer, unsigned length, void* esp, bool to_write) {
 
-					lock_acquire(&file_resource_lock);
-					file_write_at(mm->spte->required_file,
-							mm->spte->user_virtual_address,
-							mm->spte->read_bytes, mm->spte->offset);
-					lock_release(&file_resource_lock);
-				}
-				free_frame_table_entry(mm->spte->frame_table_entry_,
-						pagedir_get_page(t->pagedir,
-								mm->spte->user_virtual_address));
-				pagedir_clear_page(t->pagedir, mm->spte->user_virtual_address);
-			}
+	char* buffer_ = buffer;
 
-			if (mm->spte->table_entry_type != TABLE_ENTRY_ERR) {
+	int i;
+	for (i = 0; i < length; i++) {
 
-				hash_delete(&t->spt, &mm->spte->sup_pte_elem);
-			}
-			list_remove(&mm->elem);
+		struct supplemental_pte *spte = validate_pointer(buffer_, esp);
 
-			if (mm->map_id != close) {
+		if (spte && to_write && !spte->is_page_writable) {
 
-				if (f) {
-
-					lock_acquire(&file_resource_lock);
-					file_close(f);
-					lock_release(&file_resource_lock);
-				}
-				close = mm->map_id;
-				f = mm->spte->required_file;
-			}
-			free(mm->spte);
-			free(mm);
+			exit(SYSCALL_ERROR);
 		}
-		e = next;
-	}
 
-	if (f) {
-
-		lock_acquire(&file_resource_lock);
-		file_close(f);
-		lock_release(&file_resource_lock);
+		buffer_++;
 	}
+}
+
+/**
+ * Validates the file and loads it.
+ */
+void validate_file(char* file, void* esp) {
+
+	char* file_ = file;
+	do {
+
+		validate_pointer(file_, esp);
+		file_ = file_ + 1;
+	} while(*file_ != '\0');
+}
+
+void remove_ptr_pin(void* vaddr) {
+
+	struct supplemental_pte *spte = get_supplemental_pte(vaddr);
+	if (spte) {
+
+		spte->is_page_pinned = false;
+	}
+}
+
+void remove_buffer_pin(char* buffer, unsigned size) {
+
+	char* buffer_ = buffer;
+
+	int i;
+	for (i = 0; i < size; i++) {
+
+		remove_ptr_pin(buffer_);
+		buffer_++;
+	}
+}
+
+void remove_string_pin(char* str) {
+
+	char* str_ = str;
+	do {
+
+		remove_ptr_pin(str_);
+		str_ = str_ + 1;
+	} while (*str_ != '\0');
 }

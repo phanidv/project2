@@ -75,7 +75,7 @@ start_process (void *file_name_)
 	file_name = strtok_r(file_name, " ", &save_ptr);*/
 
 	// Initialize page table
-	init_sup_page_table(&thread_current()->spt);
+	init_sup_page_table(&thread_current()->supplementary_pt);
 
 	/* Initialize interrupt frame and load executable. */
 	memset (&if_, 0, sizeof if_);
@@ -174,8 +174,8 @@ void process_exit(void) {
 		cur->my_position_in_parent_children->has_exited = true;
 	}
 
-	delete_mem_map_entry(PROCESS_EXIT);
-	destroy_sup_page_table(&cur->spt);
+	delete_mem_map_entry_all_or_one(true, NULL);
+	destroy_sup_page_table(&cur->supplementary_pt);
 
 	/* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
