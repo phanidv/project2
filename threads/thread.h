@@ -115,6 +115,11 @@ struct thread {
 	// List files used by the thread
 	struct list currently_used_files;
 
+    // Needed for timer_sleep()
+    int64_t ticks;
+
+    struct dir *cwd;
+
 };
 
 // Status codes of file descriptor
