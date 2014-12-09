@@ -68,6 +68,13 @@ static void start_process(void *file_name_) {
 	if_.eflags = FLAG_IF | FLAG_MBS;
 	success = load(file_name, &if_.eip, &if_.esp);
 
+	//TODO
+	if (!thread_current()->cwd) {
+
+		thread_current()->cwd = dir_open_root();
+	}
+	//************
+
 	struct spawned_child_thread *my_pos =
 			thread_current()->my_position_in_parent_children;
 
@@ -148,8 +155,14 @@ void process_exit(void) {
 	//delete and free up all the children
 	delete_child_all_or_one(true, NULL);
 
-	//checking if the parent is alive
 	//TODO
+	if (thread_current()->cwd) {
+
+		dir_close(thread_current()->cwd);
+	}
+	//***********
+
+	//checking if the parent is alive
 	if (is_present_in_kernel(cur->parent_tid)){ //&& cur->my_position_in_parent_children) {
 
 		//if alive, set the flag that the current process has exited

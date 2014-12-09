@@ -17,6 +17,11 @@ struct file_details {
 
 	// list_elem that will be present in thread's list of currently used files.
 	struct list_elem elem;
+
+	//TODO
+	struct dir *dir;
+	bool isdir;
+	//************
 };
 
 void syscall_init(void);

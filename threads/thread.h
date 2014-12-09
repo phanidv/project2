@@ -6,6 +6,11 @@
 #include <stdint.h>
 #include <threads/synch.h>
 
+//TODO
+// Needed for timer_sleep()
+struct list sleep_list;
+//**********
+
 /* States in a thread's life cycle. */
 enum thread_status {
 	THREAD_RUNNING, /* Running thread. */
@@ -115,6 +120,12 @@ struct thread {
 	// List files used by the thread
 	struct list currently_used_files;
 
+	//TODO
+    // Needed for timer_sleep()
+    int64_t ticks;
+
+    struct dir *cwd;
+    //*********
 };
 
 // Status codes of file descriptor
@@ -195,5 +206,10 @@ int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
 bool is_present_in_kernel(int pid);
+
+//TODO
+bool cmp_ticks(const struct list_elem *a, const struct list_elem *b,
+		void *aux UNUSED);
+//***********
 
 #endif /* threads/thread.h */
