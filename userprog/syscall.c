@@ -12,9 +12,8 @@
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
-#include "filesys/inode.h"
 
-int add_file_to_currently_used_files(struct file *file_, bool isdir);
+int add_file_to_currently_used_files(struct file *file_);
 struct file* get_file_from_currently_used_files(int file_descriptor);
 
 static void syscall_handler(struct intr_frame *);
@@ -31,7 +30,7 @@ int read_from_file(int file_descriptor, void *buffer, unsigned size_to_be_read);
 int write_to_standard_output(void *buffer, unsigned size_to_be_read);
 int write_to_file(int file_descriptor, void *buffer, unsigned size_to_be_read);
 int perform_actions_after_file_open(struct file *file_);
-void close_single_file(struct file_details* file_detials, bool isdir);
+void close_single_file(struct file_details* file_detials);
 struct file_details* find_file_details(struct thread *t, int file_descriptor);
 
 // Start - Syscall declarations
@@ -364,7 +363,7 @@ int wait(pid_t pid) {
  */
 bool create(const char *file, unsigned initial_size) {
 	lock_acquire(&file_resource_lock);
-	bool success = filesys_create(file, initial_size, false);
+	bool success = filesys_create(file, initial_size);
 	lock_release(&file_resource_lock);
 	return success;
 }
@@ -510,33 +509,25 @@ int get_physicaladdr(const void *virtual_addr) {
 }
 
 /**
- * Adds file/dir to the list of files used by the thread and returns the file descriptor
+ * Adds file to the list of files used by the thread and returns the file descriptor
  */
-int add_file_to_currently_used_files(struct file *file_, bool isdir) {
+int add_file_to_currently_used_files(struct file *file_) {
 
-	struct file_details *fdet = malloc(sizeof(struct file_details));
+	struct file_details *f_details = malloc(sizeof(struct file_details));
 
-	if(!fdet){
+	//TODO
+	if(!f_details){
 		return SYSCALL_ERROR;
 	}
 
-	if (isdir) {
-
-		fdet->dir = (struct dir *) file_;
-		fdet->isdir = true;
-	}
-	else {
-
-		fdet->file = file_;
-		fdet->isdir = false;
-	}
-	fdet->file_descriptor = thread_current()->current_fd_to_be_assigned;
+	f_details->file = file_;
+	f_details->file_descriptor = thread_current()->current_fd_to_be_assigned;
 
 	thread_current()->current_fd_to_be_assigned++;
 
-	list_push_back(&thread_current()->currently_used_files, &fdet->elem);
+	list_push_back(&thread_current()->currently_used_files, &f_details->elem);
 
-	return fdet->file_descriptor;
+	return f_details->file_descriptor;
 }
 
 /**
@@ -580,7 +571,7 @@ void close_file(int file_descriptor) {
 		if (file_details_ != NULL) {
 
 			//helper to close file with descriptor fd.
-			file_details_->isdir ? close_single_file(file_details_, true) : close_single_file(file_details_, false);
+			close_single_file(file_details_);
 		}
 	} else {
 		for (e = list_begin(&current_thread->currently_used_files);
@@ -592,22 +583,18 @@ void close_file(int file_descriptor) {
 					list_entry (e, struct file_details, elem);
 
 			if (file_details_ != NULL) {
-
-				file_details_->isdir ? close_single_file(file_details_, true) : close_single_file(file_details_, false);
+				close_single_file(file_details_);
 			}
 		}
 	}
 }
-
 /**
  * Closes a single file
  */
-void close_single_file(struct file_details* file_detials, bool isdir) {
+void close_single_file(struct file_details* file_detials) {
 
 	if (file_detials != NULL) {
-
-		isdir ? dir_close(file_detials->dir) : file_close(file_detials->file);
-
+		file_close(file_detials->file);
 		list_remove(&file_detials->elem);
 
 		free(file_detials);
@@ -700,15 +687,7 @@ int perform_actions_after_file_open(struct file *file_) {
 		return SYSCALL_ERROR;
 	}
 
-	int fd;
-	if (inode_is_dir(file_get_inode(file_))) {
-
-		fd = add_file_to_currently_used_files(file_, true);
-	} else {
-
-		fd = add_file_to_currently_used_files(file_, false);
-	}
-	return fd;
+	return add_file_to_currently_used_files(file_);
 }
 
 // Retrieves the system call parameters
